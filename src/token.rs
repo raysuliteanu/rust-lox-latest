@@ -31,7 +31,7 @@ pub enum TokenError {
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub struct Token {
     pub(crate) lexeme: TokenType,
-    source_span: Option<SourceSpan>,
+    pub(crate) source_span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, EnumMessage, IntoStaticStr)]
@@ -116,6 +116,10 @@ pub enum TokenType {
     Identifier { val: String },
     #[strum(detailed_message = "{.val}")]
     String { val: String },
+
+    // symbolic placeholder
+    #[strum(message = "EOF")]
+    Eof,
 }
 
 impl Display for TokenType {

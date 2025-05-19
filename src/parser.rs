@@ -1,6 +1,8 @@
 use std::{fmt::Display, iter::Peekable};
 
 use log::trace;
+use miette::Diagnostic;
+use thiserror::Error;
 
 use crate::token::{Scanner, Token, TokenType};
 
@@ -95,8 +97,48 @@ impl Display for ExpressionType {
     }
 }
 
+#[derive(Error, Debug, Diagnostic)]
+#[diagnostic(code("65"))]
+pub enum ParseError {
+    #[error("missing token {} got {}", expected.lexeme, actual.lexeme)]
+    MissingToken { expected: Token, actual: Token },
+
+    #[error("unexpected token {actual}")]
+    UnexpectedToken { actual: Token },
+
+    #[error("Unexpected EOF")]
+    UnexpectedEof,
+}
+
 pub struct Parser<'a> {
     scanner: Scanner<'a>,
+}
+
+macro_rules! ast_expected_token {
+    ($tokens: expr, $typ: expr) => {
+        if let Some(t) = $tokens.peek() {
+            Err(ParseError::MissingToken {
+                expected: Token {
+                    lexeme: $typ,
+                    source_span: None,
+                },
+                actual: t.clone().clone(),
+            }
+            .into())
+        } else {
+            Err(ParseError::MissingToken {
+                expected: Token {
+                    lexeme: $typ,
+                    source_span: None,
+                },
+                actual: Token {
+                    lexeme: TokenType::Eof,
+                    source_span: None,
+                },
+            }
+            .into())
+        }
+    };
 }
 
 macro_rules! ast_binary {
@@ -180,7 +222,7 @@ impl Parser<'_> {
                 _ => Parser::expression_statement(tokens),
             }
         } else {
-            todo!("unexpected 'eof'")
+            Err(ParseError::UnexpectedEof.into())
         }
     }
 
@@ -211,7 +253,7 @@ impl Parser<'_> {
                 ty: AstType::PrintStatement(Box::new(expr)),
             })
         } else {
-            todo!("expected semicolon")
+            ast_expected_token!(tokens, TokenType::SemiColon)
         }
     }
 
@@ -236,7 +278,7 @@ impl Parser<'_> {
                     ty: AstType::ReturnStatement(Some(Box::new(expr))),
                 })
             } else {
-                todo!("expected semicolon")
+                ast_expected_token!(tokens, TokenType::SemiColon)
             }
         }
     }
@@ -255,7 +297,7 @@ impl Parser<'_> {
         {
             Ok(ast)
         } else {
-            todo!("expected semicolon")
+            ast_expected_token!(tokens, TokenType::SemiColon)
         }
     }
 
@@ -346,15 +388,25 @@ impl Parser<'_> {
                 TokenType::True | TokenType::False | TokenType::Nil
             )
         }) {
-            return Ok(ast_terminal!(token));
+            Ok(ast_terminal!(token))
         } else if let Some(_left_paren) =
             tokens.next_if(|t| matches!(t.lexeme, TokenType::LeftParen))
         {
             let expr = Parser::expression(tokens)?;
             if let Some(_right_paren) = tokens.next_if(|t| t.lexeme == TokenType::RightParen) {
-                return Ok(ast_group!(expr));
+                Ok(ast_group!(expr))
+            } else if tokens.peek().is_some() {
+                // something other than a closing ')'
+                Err(ParseError::MissingToken {
+                    expected: Token {
+                        lexeme: TokenType::RightParen,
+                        source_span: None,
+                    },
+                    actual: tokens.next().unwrap().clone(),
+                }
+                .into())
             } else {
-                todo!("check for missing ) or eof and return missing token or unexpected eof")
+                Err(ParseError::UnexpectedEof.into())
             }
         } else if let Some(token) = tokens.next_if(|t| {
             matches!(
@@ -362,9 +414,12 @@ impl Parser<'_> {
                 TokenType::Number { .. } | TokenType::String { .. } | TokenType::Identifier { .. }
             )
         }) {
-            return Ok(ast_terminal!(token.clone()));
+            Ok(ast_terminal!(token.clone()))
         } else {
-            panic!("unexpected token {:?}", tokens.peek());
+            Err(ParseError::UnexpectedToken {
+                actual: tokens.next().unwrap().clone(),
+            }
+            .into())
         }
     }
 }

@@ -26,8 +26,8 @@ pub enum AstType {
     ExprStatement,
     ForStatement,
     IfStatement,
-    PrintStatement,
-    ReturnStatement,
+    PrintStatement(Box<Ast>),
+    ReturnStatement(Option<Box<Ast>>),
     WhileStatement,
     Block,
     Group(Box<Ast>),
@@ -44,8 +44,16 @@ impl Display for AstType {
             AstType::ExprStatement => todo!(),
             AstType::ForStatement => todo!(),
             AstType::IfStatement => todo!(),
-            AstType::PrintStatement => todo!(),
-            AstType::ReturnStatement => todo!(),
+            AstType::PrintStatement(ast) => {
+                write!(f, "print {};", ast)
+            }
+            AstType::ReturnStatement(ast) => {
+                write!(f, "return")?;
+                if ast.is_some() {
+                    write!(f, " {}", ast.as_ref().unwrap())?;
+                }
+                write!(f, ";")
+            }
             AstType::WhileStatement => todo!(),
             AstType::Block => todo!(),
             AstType::Group(ast) => {
@@ -193,12 +201,44 @@ impl Parser<'_> {
 
     fn print_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {
         trace!("print_stmt: {:?}", tokens.peek());
-        todo!("parse block")
+        assert_eq!(TokenType::Print, tokens.next().unwrap().lexeme);
+        let expr = Parser::expression(tokens)?;
+        if tokens
+            .next_if(|t| t.lexeme == TokenType::SemiColon)
+            .is_some()
+        {
+            Ok(Ast {
+                ty: AstType::PrintStatement(Box::new(expr)),
+            })
+        } else {
+            todo!("expected semicolon")
+        }
     }
 
     fn return_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {
         trace!("return_stmt: {:?}", tokens.peek());
-        todo!("parse block")
+        if tokens
+            .next_if(|t| t.lexeme == TokenType::SemiColon)
+            .is_some()
+        {
+            // a 'return' without expression
+            Ok(Ast {
+                ty: AstType::ReturnStatement(None),
+            })
+        } else {
+            assert_eq!(TokenType::Return, tokens.next().unwrap().lexeme);
+            let expr = Parser::expression(tokens)?;
+            if tokens
+                .next_if(|t| t.lexeme == TokenType::SemiColon)
+                .is_some()
+            {
+                Ok(Ast {
+                    ty: AstType::ReturnStatement(Some(Box::new(expr))),
+                })
+            } else {
+                todo!("expected semicolon")
+            }
+        }
     }
 
     fn while_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {

@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
+use parser::Ast;
 use std::{
     fs,
     io::{BufRead as _, Write as _, stdout},
@@ -7,83 +8,46 @@ use std::{
 };
 
 use miette::{IntoDiagnostic, Result, WrapErr};
-use token::Scanner;
 
 mod parser;
 mod token;
 
 #[derive(Parser)]
 struct Lox {
-    #[command(subcommand)]
-    commands: Option<LoxCommands>,
+    filename: Option<String>,
 }
 
-#[derive(Subcommand)]
-enum LoxCommands {
-    Tokenize { filename: PathBuf },
-    Parse { filename: PathBuf },
-    Evaluate { filename: PathBuf },
-    Run { filename: PathBuf },
-}
-
-fn main() -> Result<ExitCode, miette::Error> {
+fn main() -> miette::Result<ExitCode> {
     env_logger::init();
 
     let lox = Lox::parse();
 
-    #[allow(unused_variables)]
-    let result = match &lox.commands {
-        Some(command) => match command {
-            LoxCommands::Tokenize { filename } => {
-                let source = get_source(filename)?;
-                let mut scanner = Scanner::new(source.as_str());
-                match scanner.scan() {
-                    Ok(t) => {
-                        t.iter().for_each(|t| println!("{t}"));
-                        0
-                    }
-                    Err(e) => {
-                        eprintln!("{e}");
-                        65
-                    }
-                }
-            }
-            LoxCommands::Parse { filename } => {
-                let source = get_source(filename)?;
-                let mut parser = parser::Parser::new(source.as_str());
-                match parser.parse() {
-                    Ok(r) => {
-                        r.iter().for_each(|t| println!("{t}"));
-                        0
-                    }
-                    Err(e) => {
-                        eprintln!("{e}");
-                        65
-                    }
-                }
-            }
-            LoxCommands::Evaluate { filename } => {
-                let source = get_source(filename)?;
-                0
-            }
-            LoxCommands::Run { filename } => {
-                let source = get_source(filename)?;
-                0
-            }
-        },
-        None => match repl() {
-            Ok(_) => 0,
-            Err(e) => {
-                eprintln!("{e}");
-                1
-            }
-        },
+    let result = if let Some(filename) = lox.filename {
+        let source = get_source(filename)?;
+        parser::Parser::new(source.as_str()).parse()
+    } else {
+        repl()
     };
 
-    Ok(ExitCode::from(result))
+    let rc = match result {
+        Ok(t) => {
+            t.iter().for_each(|t| println!("{t}"));
+            0
+        }
+        Err(e) => {
+            eprintln!("{e:?}");
+            e.code()
+                .unwrap_or(Box::new("1"))
+                .to_string()
+                .parse::<u8>()
+                .into_diagnostic()?
+        }
+    };
+
+    Ok(ExitCode::from(rc))
 }
 
-pub fn repl() -> Result<u8, miette::Error> {
+pub fn repl() -> Result<Vec<Ast>, miette::Error> {
     let mut stdin = std::io::stdin().lock();
     loop {
         let mut expr = String::new();
@@ -99,18 +63,19 @@ pub fn repl() -> Result<u8, miette::Error> {
             break;
         }
 
-        Scanner::new(source)
-            .scan()?
-            .iter()
-            .for_each(|t| println!("{t}"));
+        let r = parser::Parser::new(source).parse();
+        match r {
+            Ok(v) => v.iter().for_each(|t| println!("{t}")),
+            Err(e) => return Err(e),
+        }
     }
 
-    Ok(0)
+    Ok(vec![])
 }
 
-fn get_source(filename: &PathBuf) -> Result<String, miette::Report> {
-    let source = fs::read_to_string(filename)
+fn get_source(filename: String) -> Result<String, miette::Report> {
+    let source = fs::read_to_string(PathBuf::from(&filename))
         .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read {}", filename.display()))?;
+        .wrap_err_with(|| format!("Failed to read {filename}"))?;
     Ok(source)
 }

@@ -267,27 +267,50 @@ impl Parser<'_> {
 
     fn return_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {
         trace!("return_stmt: {:?}", tokens.peek());
+        assert_eq!(TokenType::Return, tokens.next().unwrap().lexeme);
+
         if tokens
             .next_if(|t| t.lexeme == TokenType::SemiColon)
             .is_some()
         {
-            // a 'return' without expression
+            // a 'return' without expression i.e. "return;"
             Ok(Ast {
                 ty: AstType::ReturnStatement(None),
             })
-        } else {
-            assert_eq!(TokenType::Return, tokens.next().unwrap().lexeme);
-            let expr = Parser::expression(tokens)?;
+        } else if tokens.peek().is_some_and(|t| {
+            !matches!(
+                t.lexeme,
+                TokenType::LeftBrace
+                    | TokenType::For
+                    | TokenType::While
+                    | TokenType::If
+                    | TokenType::Print
+                    | TokenType::Return
+            )
+        }) {
+            let ast = Parser::expression(tokens)?;
             if tokens
                 .next_if(|t| t.lexeme == TokenType::SemiColon)
                 .is_some()
             {
                 Ok(Ast {
-                    ty: AstType::ReturnStatement(Some(Box::new(expr))),
+                    ty: AstType::ReturnStatement(Some(Box::new(ast))),
                 })
             } else {
                 ast_expected_token!(tokens, TokenType::SemiColon)
             }
+        } else {
+            Err(ParseError::MissingToken {
+                expected: Token {
+                    lexeme: TokenType::SemiColon,
+                    source_span: None,
+                },
+                actual: Token {
+                    lexeme: TokenType::Eof,
+                    source_span: None,
+                },
+            }
+            .into())
         }
     }
 

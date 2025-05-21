@@ -114,6 +114,22 @@ pub struct Parser<'a> {
     scanner: Scanner<'a>,
 }
 
+macro_rules! ast_missing_token {
+    ($e: expr, $a: expr) => {
+        ParseError::MissingToken {
+            expected: Token {
+                lexeme: $e,
+                source_span: None,
+            },
+            actual: Token {
+                lexeme: $a,
+                source_span: None,
+            },
+        }
+        .into()
+    };
+}
+
 /// macro for handling error case when next token was not what was expected.
 /// it could be either because the next token was some other "real" token or
 /// it could because the next "token" was actually no more tokens i.e. "eof"
@@ -300,6 +316,7 @@ impl Parser<'_> {
                 ast_expected_token!(tokens, TokenType::SemiColon)
             }
         } else {
+            Err(ast_missing_token!(TokenType::SemiColon, TokenType::Eof))
         }
     }
 

@@ -220,6 +220,7 @@ impl Parser<'_> {
         trace!("statement: {:?}", tokens.peek());
         if let Some(token) = tokens.peek() {
             match token.lexeme {
+                // left brace token indicates block start
                 crate::token::TokenType::LeftBrace => Parser::parse_block(tokens),
                 crate::token::TokenType::For => Parser::for_stmt(tokens),
                 crate::token::TokenType::If => Parser::if_stmt(tokens),
@@ -240,12 +241,12 @@ impl Parser<'_> {
 
     fn for_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {
         trace!("for_stmt: {:?}", tokens.peek());
-        todo!("parse block")
+        todo!("parse for stmt")
     }
 
     fn if_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {
         trace!("if_stmt: {:?}", tokens.peek());
-        todo!("parse block")
+        todo!("parse if stmt")
     }
 
     fn print_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {
@@ -292,7 +293,7 @@ impl Parser<'_> {
 
     fn while_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {
         trace!("while_stmt: {:?}", tokens.peek());
-        todo!("parse block")
+        todo!("parse while stmt")
     }
 
     fn expression_statement(tokens: &mut PeekableToken) -> miette::Result<Ast> {

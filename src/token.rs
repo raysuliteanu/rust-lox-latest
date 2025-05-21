@@ -362,6 +362,19 @@ impl Scanner<'_> {
                             tokens.push(Token::new(TokenType::Identifier { val: str }, i, len))
                         }
                     }
+                    '/' => {
+                        if peekable_iter.peek().is_some_and(|(_, l)| *l == '/') {
+                            // line comment so each chars till EOL chars
+                            while peekable_iter
+                                .peek()
+                                .is_some_and(|(_i, c)| !one_of(*c, "\n\r"))
+                            {
+                                peekable_iter.next();
+                            }
+                        } else {
+                            tokens.push(Token::new(TokenType::Slash, i, 1))
+                        }
+                    }
                     _ => {
                         return Err(TokenError::InvalidToken {
                             src: self.source.to_string(),

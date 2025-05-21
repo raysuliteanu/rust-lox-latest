@@ -1,5 +1,4 @@
-1 + 2;
-2 * 3;
-3 / 1;
+print 1 + 2;
+// this is a comment
+print 3 / 4;
 print hello + "world";
-return

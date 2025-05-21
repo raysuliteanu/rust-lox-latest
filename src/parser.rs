@@ -114,6 +114,9 @@ pub struct Parser<'a> {
     scanner: Scanner<'a>,
 }
 
+/// macro for handling error case when next token was not what was expected.
+/// it could be either because the next token was some other "real" token or
+/// it could because the next "token" was actually no more tokens i.e. "eof"
 macro_rules! ast_expected_token {
     ($tokens: expr, $typ: expr) => {
         if let Some(t) = $tokens.peek() {
@@ -141,6 +144,7 @@ macro_rules! ast_expected_token {
     };
 }
 
+/// convenience macro for creating a new binary expression AST node
 macro_rules! ast_binary {
     ($op: expr, $l: expr, $r: expr) => {
         Ast {
@@ -153,6 +157,7 @@ macro_rules! ast_binary {
     };
 }
 
+/// convenience macro for creating a new expression group AST node
 macro_rules! ast_group {
     ($e: expr) => {
         Ast {
@@ -161,6 +166,7 @@ macro_rules! ast_group {
     };
 }
 
+/// convenience macro for creating a new unary expression AST node
 macro_rules! ast_unary {
     ($op: expr, $exp: expr) => {
         Ast {
@@ -174,6 +180,7 @@ macro_rules! ast_unary {
     };
 }
 
+/// convenience macro for creating a new terminal AST node
 macro_rules! ast_terminal {
     ($t: expr) => {
         Ast {

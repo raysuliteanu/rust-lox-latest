@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::token::{Scanner, Token, TokenType};
 
-type PeekableToken<'a> = Peekable<std::slice::Iter<'a, Token>>;
+type PeekableTokenIter<'a> = Peekable<std::slice::Iter<'a, Token>>;
 
 #[derive(Debug)]
 pub struct Ast {
@@ -205,7 +205,7 @@ impl Parser<'_> {
         Parser::program(&mut tokens.iter().peekable())
     }
 
-    fn program(tokens: &mut PeekableToken) -> miette::Result<Vec<Ast>> {
+    fn program(tokens: &mut PeekableTokenIter) -> miette::Result<Vec<Ast>> {
         let mut ast: Vec<Ast> = Vec::new();
 
         while let Some(_token) = tokens.peek() {
@@ -216,7 +216,7 @@ impl Parser<'_> {
         Ok(ast)
     }
 
-    fn statement(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn statement(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("statement: {:?}", tokens.peek());
         if let Some(token) = tokens.peek() {
             match token.lexeme {
@@ -234,22 +234,22 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_block(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn parse_block(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("block_stmt: {:?}", tokens.peek());
         todo!("parse block")
     }
 
-    fn for_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn for_stmt(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("for_stmt: {:?}", tokens.peek());
         todo!("parse for stmt")
     }
 
-    fn if_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn if_stmt(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("if_stmt: {:?}", tokens.peek());
         todo!("parse if stmt")
     }
 
-    fn print_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn print_stmt(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("print_stmt: {:?}", tokens.peek());
         assert_eq!(TokenType::Print, tokens.next().unwrap().lexeme);
         let expr = Parser::expression(tokens)?;
@@ -265,7 +265,7 @@ impl Parser<'_> {
         }
     }
 
-    fn return_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn return_stmt(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("return_stmt: {:?}", tokens.peek());
         assert_eq!(TokenType::Return, tokens.next().unwrap().lexeme);
 
@@ -300,26 +300,15 @@ impl Parser<'_> {
                 ast_expected_token!(tokens, TokenType::SemiColon)
             }
         } else {
-            Err(ParseError::MissingToken {
-                expected: Token {
-                    lexeme: TokenType::SemiColon,
-                    source_span: None,
-                },
-                actual: Token {
-                    lexeme: TokenType::Eof,
-                    source_span: None,
-                },
-            }
-            .into())
         }
     }
 
-    fn while_stmt(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn while_stmt(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("while_stmt: {:?}", tokens.peek());
         todo!("parse while stmt")
     }
 
-    fn expression_statement(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn expression_statement(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("expr_stmt: {:?}", tokens.peek());
         let ast = Parser::expression(tokens)?;
         if tokens
@@ -332,12 +321,12 @@ impl Parser<'_> {
         }
     }
 
-    fn expression(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn expression(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("expr: {:?}", tokens.peek());
         Parser::equality(tokens)
     }
 
-    fn equality(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn equality(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("equality: {:?}", tokens.peek());
         let mut left = Parser::comparison(tokens)?;
 
@@ -352,7 +341,7 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn comparison(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn comparison(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("comparison: {:?}", tokens.peek());
         let mut left = Parser::term(tokens)?;
 
@@ -370,7 +359,7 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn term(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn term(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("term: {:?}", tokens.peek());
         let mut left = Parser::factor(tokens)?;
 
@@ -385,7 +374,7 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn factor(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn factor(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("factor: {:?}", tokens.peek());
         let mut left = Parser::unary(tokens)?;
 
@@ -400,7 +389,7 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn unary(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn unary(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("unary: {:?}", tokens.peek());
         if let Some(t) = tokens.next_if(|t| matches!(t.lexeme, TokenType::Minus | TokenType::Bang))
         {
@@ -411,7 +400,7 @@ impl Parser<'_> {
         }
     }
 
-    fn primary(tokens: &mut PeekableToken) -> miette::Result<Ast> {
+    fn primary(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("primary: {:?}", tokens.peek());
         if let Some(token) = tokens.next_if(|t| {
             matches!(

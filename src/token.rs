@@ -306,9 +306,9 @@ impl Scanner<'_> {
                             let (l, _) = peekable_iter.next().unwrap();
                             tokens.push(Token::new(
                                 TokenType::String { val: str },
+                                line,
                                 i + 1, // i points to the first '"' so add 1
-                                l - 1 - line,
-                                i, // l points to the last '"' so sub 1
+                                l - 1, // l points to the last '"' so sub 1
                             ))
                         }
                     }

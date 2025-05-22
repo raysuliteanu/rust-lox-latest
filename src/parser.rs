@@ -59,10 +59,10 @@ impl Display for AstType {
             AstType::WhileStatement => todo!(),
             AstType::Block => todo!(),
             AstType::Group(ast) => {
-                write!(f, "({ast})")
+                write!(f, "(group {ast})")
             }
             AstType::Expression(e) => {
-                write!(f, "{e}")
+                write!(f, "({e})")
             }
             AstType::Terminal(t) => {
                 write!(f, "{}", t.lexeme)
@@ -226,6 +226,7 @@ impl Parser<'_> {
                 _ => Parser::expression_statement(tokens),
             }
         } else {
+            // TODO: I think this should never happen since in program() there's already a peek()
             Err(ParseError::UnexpectedEof.into())
         }
     }

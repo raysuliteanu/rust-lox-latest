@@ -100,10 +100,13 @@ impl Display for ExpressionType {
 #[derive(Error, Debug, Diagnostic)]
 #[diagnostic(code("65"))]
 pub enum ParseError {
-    #[error("missing token {} got {}", expected.lexeme, actual.lexeme)]
-    MissingToken { expected: Token, actual: Token },
+    #[error("missing token '{}' got '{}'", expected, actual)]
+    MissingToken {
+        expected: TokenType,
+        actual: TokenType,
+    },
 
-    #[error("unexpected token {actual}")]
+    #[error("unexpected token '{actual}'")]
     UnexpectedToken { actual: Token },
 
     #[error("Unexpected EOF")]
@@ -117,14 +120,8 @@ pub struct Parser<'a> {
 macro_rules! ast_missing_token {
     ($e: expr, $a: expr) => {
         ParseError::MissingToken {
-            expected: Token {
-                lexeme: $e,
-                source_span: None,
-            },
-            actual: Token {
-                lexeme: $a,
-                source_span: None,
-            },
+            expected: $e,
+            actual: $a,
         }
         .into()
     };
@@ -134,29 +131,12 @@ macro_rules! ast_missing_token {
 /// it could be either because the next token was some other "real" token or
 /// it could because the next "token" was actually no more tokens i.e. "eof"
 macro_rules! ast_expected_token {
-    ($tokens: expr, $typ: expr) => {
-        if let Some(t) = $tokens.peek() {
-            Err(ParseError::MissingToken {
-                expected: Token {
-                    lexeme: $typ,
-                    source_span: None,
-                },
-                actual: t.clone().clone(),
-            }
-            .into())
-        } else {
-            Err(ParseError::MissingToken {
-                expected: Token {
-                    lexeme: $typ,
-                    source_span: None,
-                },
-                actual: Token {
-                    lexeme: TokenType::Eof,
-                    source_span: None,
-                },
-            }
-            .into())
+    ($t: expr, $e: expr) => {
+        Err(ParseError::MissingToken {
+            expected: $e,
+            actual: $t.lexeme.clone(),
         }
+        .into())
     };
 }
 
@@ -267,7 +247,10 @@ impl Parser<'_> {
 
     fn print_stmt(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
         trace!("print_stmt: {:?}", tokens.peek());
-        assert_eq!(TokenType::Print, tokens.next().unwrap().lexeme);
+
+        let print_token = tokens.next().unwrap();
+        assert_eq!(TokenType::Print, print_token.lexeme);
+
         let expr = Parser::expression(tokens)?;
         if tokens
             .next_if(|t| t.lexeme == TokenType::SemiColon)
@@ -276,8 +259,10 @@ impl Parser<'_> {
             Ok(Ast {
                 ty: AstType::PrintStatement(Box::new(expr)),
             })
+        } else if tokens.peek().is_some() {
+            ast_expected_token!(print_token, TokenType::SemiColon)
         } else {
-            ast_expected_token!(tokens, TokenType::SemiColon)
+            Err(ParseError::UnexpectedEof.into())
         }
     }
 
@@ -312,8 +297,10 @@ impl Parser<'_> {
                 Ok(Ast {
                     ty: AstType::ReturnStatement(Some(Box::new(ast))),
                 })
+            } else if tokens.peek().is_some() {
+                ast_expected_token!(tokens.peek().unwrap(), TokenType::SemiColon)
             } else {
-                ast_expected_token!(tokens, TokenType::SemiColon)
+                Err(ast_missing_token!(TokenType::SemiColon, TokenType::Eof))
             }
         } else {
             Err(ast_missing_token!(TokenType::SemiColon, TokenType::Eof))
@@ -326,15 +313,18 @@ impl Parser<'_> {
     }
 
     fn expression_statement(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
-        trace!("expr_stmt: {:?}", tokens.peek());
+        let token = tokens.peek();
+        trace!("expr_stmt: {:?}", token);
         let ast = Parser::expression(tokens)?;
         if tokens
             .next_if(|t| t.lexeme == TokenType::SemiColon)
             .is_some()
         {
             Ok(ast)
+        } else if tokens.peek().is_some() {
+            ast_expected_token!(tokens.peek().unwrap(), TokenType::SemiColon)
         } else {
-            ast_expected_token!(tokens, TokenType::SemiColon)
+            Err(ast_missing_token!(TokenType::SemiColon, TokenType::Eof))
         }
     }
 
@@ -435,11 +425,8 @@ impl Parser<'_> {
             } else if tokens.peek().is_some() {
                 // something other than a closing ')'
                 Err(ParseError::MissingToken {
-                    expected: Token {
-                        lexeme: TokenType::RightParen,
-                        source_span: None,
-                    },
-                    actual: tokens.next().unwrap().clone(),
+                    expected: TokenType::RightParen,
+                    actual: tokens.next().unwrap().lexeme.clone(),
                 }
                 .into())
             } else {

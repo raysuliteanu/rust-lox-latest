@@ -53,6 +53,29 @@ impl Span {
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
+pub struct Span {
+    line: usize,
+    source_span: Option<SourceSpan>,
+}
+
+impl Span {
+    pub fn new(line: usize, start: usize, len: usize) -> Self {
+        Span {
+            line,
+            source_span: Some((start, len).into()),
+        }
+    }
+    #[inline]
+    pub fn line(&self) -> usize {
+        self.line
+    }
+
+    pub fn source(&self) -> Option<SourceSpan> {
+        self.source_span
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub struct Token {
     pub(crate) lexeme: TokenType,
     pub(crate) span: Span,

@@ -29,9 +29,33 @@ pub enum TokenError {
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
+pub struct Span {
+    line: usize,
+    source_span: Option<SourceSpan>,
+}
+
+impl Span {
+    pub fn new(line: usize, start: usize, len: usize) -> Self {
+        Span {
+            line,
+            source_span: Some((start, len).into()),
+        }
+    }
+
+    #[inline]
+    pub fn line(&self) -> usize {
+        self.line
+    }
+
+    pub fn source(&self) -> Option<SourceSpan> {
+        self.source_span
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub struct Token {
     pub(crate) lexeme: TokenType,
-    pub(crate) source_span: Option<SourceSpan>,
+    pub(crate) span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, EnumMessage, IntoStaticStr)]
@@ -133,10 +157,13 @@ impl Display for TokenType {
 }
 
 impl Token {
-    pub fn new(ty: TokenType, start: ByteOffset, len: usize) -> Token {
+    pub fn new(ty: TokenType, line: usize, start: ByteOffset, len: usize) -> Token {
         Token {
             lexeme: ty,
-            source_span: Some((start, len).into()),
+            span: Span {
+                line,
+                source_span: Some((start, len).into()),
+            },
         }
     }
 }
@@ -210,49 +237,49 @@ impl Scanner<'_> {
                     }
                     c if c.is_whitespace() => continue,
                     c if one_of(c, "(){}+-;,*.") => match c {
-                        '(' => tokens.push(Token::new(TokenType::LeftParen, i, 1)),
-                        ')' => tokens.push(Token::new(TokenType::RightParen, i, 1)),
-                        '{' => tokens.push(Token::new(TokenType::LeftBrace, i, 1)),
-                        '}' => tokens.push(Token::new(TokenType::RightBrace, i, 1)),
-                        ',' => tokens.push(Token::new(TokenType::Comma, i, 1)),
-                        '.' => tokens.push(Token::new(TokenType::Dot, i, 1)),
-                        '+' => tokens.push(Token::new(TokenType::Plus, i, 1)),
-                        '-' => tokens.push(Token::new(TokenType::Minus, i, 1)),
-                        ';' => tokens.push(Token::new(TokenType::SemiColon, i, 1)),
-                        '*' => tokens.push(Token::new(TokenType::Star, i, 1)),
+                        '(' => tokens.push(Token::new(TokenType::LeftParen, line, i, 1)),
+                        ')' => tokens.push(Token::new(TokenType::RightParen, line, i, 1)),
+                        '{' => tokens.push(Token::new(TokenType::LeftBrace, line, i, 1)),
+                        '}' => tokens.push(Token::new(TokenType::RightBrace, line, i, 1)),
+                        ',' => tokens.push(Token::new(TokenType::Comma, line, i, 1)),
+                        '.' => tokens.push(Token::new(TokenType::Dot, line, i, 1)),
+                        '+' => tokens.push(Token::new(TokenType::Plus, line, i, 1)),
+                        '-' => tokens.push(Token::new(TokenType::Minus, line, i, 1)),
+                        ';' => tokens.push(Token::new(TokenType::SemiColon, line, i, 1)),
+                        '*' => tokens.push(Token::new(TokenType::Star, line, i, 1)),
                         _ => unreachable!(),
                     },
                     c if one_of(c, "<>=!") => match c {
                         '=' => {
                             if peekable_iter.peek().is_some_and(|(_, l)| *l == '=') {
                                 peekable_iter.next();
-                                tokens.push(Token::new(TokenType::EqEq, i, 2))
+                                tokens.push(Token::new(TokenType::EqEq, line, i, 2))
                             } else {
-                                tokens.push(Token::new(TokenType::Eq, i, 1))
+                                tokens.push(Token::new(TokenType::Eq, line, i, 1))
                             }
                         }
                         '<' => {
                             if peekable_iter.peek().is_some_and(|(_, l)| *l == '=') {
                                 peekable_iter.next();
-                                tokens.push(Token::new(TokenType::LessEq, i, 2))
+                                tokens.push(Token::new(TokenType::LessEq, line, i, 2))
                             } else {
-                                tokens.push(Token::new(TokenType::Less, i, 1))
+                                tokens.push(Token::new(TokenType::Less, line, i, 1))
                             }
                         }
                         '>' => {
                             if peekable_iter.peek().is_some_and(|(_, l)| *l == '=') {
                                 peekable_iter.next();
-                                tokens.push(Token::new(TokenType::GreaterEq, i, 2))
+                                tokens.push(Token::new(TokenType::GreaterEq, line, i, 2))
                             } else {
-                                tokens.push(Token::new(TokenType::Greater, i, 1))
+                                tokens.push(Token::new(TokenType::Greater, line, i, 1))
                             }
                         }
                         '!' => {
                             if peekable_iter.peek().is_some_and(|(_, l)| *l == '=') {
                                 peekable_iter.next();
-                                tokens.push(Token::new(TokenType::BangEq, i, 2))
+                                tokens.push(Token::new(TokenType::BangEq, line, i, 2))
                             } else {
-                                tokens.push(Token::new(TokenType::Bang, i, 1))
+                                tokens.push(Token::new(TokenType::Bang, line, i, 1))
                             }
                         }
                         _ => unreachable!(),
@@ -280,8 +307,9 @@ impl Scanner<'_> {
                             let (l, _) = peekable_iter.next().unwrap();
                             tokens.push(Token::new(
                                 TokenType::String { val: str },
-                                i + 1,     // i points to the first '"' so add 1
-                                l - 1 - i, // l points to the last '"' so sub 1
+                                i + 1, // i points to the first '"' so add 1
+                                l - 1 - line,
+                                i, // l points to the last '"' so sub 1
                             ))
                         }
                     }
@@ -343,7 +371,12 @@ impl Scanner<'_> {
                             }
                         };
 
-                        tokens.push(Token::new(TokenType::Number { val }, i, num_literal.len()))
+                        tokens.push(Token::new(
+                            TokenType::Number { val },
+                            line,
+                            i,
+                            num_literal.len(),
+                        ))
                     }
                     c if c.is_alphabetic() | (c == '_') => {
                         let mut str = String::from(c);
@@ -356,10 +389,15 @@ impl Scanner<'_> {
                         }
 
                         if let Some(keyword) = is_keyword_token!(str.as_str()) {
-                            tokens.push(Token::new(keyword, i, str.len()))
+                            tokens.push(Token::new(keyword, line, i, str.len()))
                         } else {
                             let len = str.len();
-                            tokens.push(Token::new(TokenType::Identifier { val: str }, i, len))
+                            tokens.push(Token::new(
+                                TokenType::Identifier { val: str },
+                                line,
+                                i,
+                                len,
+                            ))
                         }
                     }
                     '/' => {
@@ -372,7 +410,7 @@ impl Scanner<'_> {
                                 peekable_iter.next();
                             }
                         } else {
-                            tokens.push(Token::new(TokenType::Slash, i, 1))
+                            tokens.push(Token::new(TokenType::Slash, line, i, 1))
                         }
                     }
                     _ => {
@@ -402,7 +440,7 @@ fn one_of(c: char, chars: &str) -> bool {
 mod tests {
     use crate::token::{Token, TokenError, TokenType};
 
-    use super::Scanner;
+    use super::{Scanner, Span};
 
     #[test]
     fn test_eqeq_literal() {
@@ -411,7 +449,10 @@ mod tests {
             source,
             &[Token {
                 lexeme: TokenType::EqEq,
-                source_span: Some((0, source.len()).into()),
+                span: Span {
+                    line: 1,
+                    source_span: Some((0, source.len()).into()),
+                },
             }],
         );
     }
@@ -423,7 +464,10 @@ mod tests {
             source,
             &[Token {
                 lexeme: TokenType::BangEq,
-                source_span: Some((0, source.len()).into()),
+                span: Span {
+                    line: 1,
+                    source_span: Some((0, source.len()).into()),
+                },
             }],
         );
     }
@@ -435,7 +479,10 @@ mod tests {
             source,
             &[Token {
                 lexeme: TokenType::GreaterEq,
-                source_span: Some((0, source.len()).into()),
+                span: Span {
+                    line: 1,
+                    source_span: Some((0, source.len()).into()),
+                },
             }],
         );
     }
@@ -447,7 +494,10 @@ mod tests {
             source,
             &[Token {
                 lexeme: TokenType::LessEq,
-                source_span: Some((0, source.len()).into()),
+                span: Span {
+                    line: 1,
+                    source_span: Some((0, source.len()).into()),
+                },
             }],
         );
     }
@@ -461,7 +511,10 @@ mod tests {
             source,
             &[Token {
                 lexeme: TokenType::String { val: expected_src },
-                source_span: Some((1, expected_src_len).into()),
+                span: Span {
+                    line: 1,
+                    source_span: Some((1, expected_src_len).into()),
+                },
             }],
         );
     }
@@ -475,7 +528,10 @@ mod tests {
                 lexeme: TokenType::Identifier {
                     val: source.to_string(),
                 },
-                source_span: Some((0, source.len()).into()),
+                span: Span {
+                    line: 1,
+                    source_span: Some((0, source.len()).into()),
+                },
             }],
         );
     }
@@ -487,7 +543,10 @@ mod tests {
             source,
             &[Token {
                 lexeme: TokenType::And,
-                source_span: Some((0, source.len()).into()),
+                span: Span {
+                    line: 1,
+                    source_span: Some((0, source.len()).into()),
+                },
             }],
         );
     }
@@ -499,7 +558,10 @@ mod tests {
             source,
             &[Token {
                 lexeme: TokenType::Number { val: 123.45 },
-                source_span: Some((0, source.len()).into()),
+                span: Span {
+                    line: 1,
+                    source_span: Some((0, source.len()).into()),
+                },
             }],
         );
     }

@@ -1,10 +1,9 @@
 use std::{fmt::Display, iter::Peekable};
 
 use log::trace;
-use miette::Diagnostic;
 use thiserror::Error;
 
-use crate::token::{Scanner, Token, TokenType};
+use crate::token::{Lexeme, Scanner, Token};
 
 type PeekableTokenIter<'a> = Peekable<std::slice::Iter<'a, Token>>;
 
@@ -97,14 +96,10 @@ impl Display for ExpressionType {
     }
 }
 
-#[derive(Error, Debug, Diagnostic)]
-#[diagnostic(code("65"))]
+#[derive(Error, Debug)]
 pub enum ParseError {
     #[error("missing token '{}' got '{}'", expected, actual)]
-    MissingToken {
-        expected: TokenType,
-        actual: TokenType,
-    },
+    MissingToken { expected: Lexeme, actual: Lexeme },
 
     #[error("unexpected token '{actual}'")]
     UnexpectedToken { actual: Token },
@@ -113,8 +108,8 @@ pub enum ParseError {
     UnexpectedEof,
 }
 
-pub struct Parser<'a> {
-    scanner: Scanner<'a>,
+pub struct Parser {
+    source: &'static str,
 }
 
 macro_rules! ast_missing_token {
@@ -185,15 +180,13 @@ macro_rules! ast_terminal {
     };
 }
 
-impl Parser<'_> {
-    pub fn new(source: &str) -> Parser {
-        Parser {
-            scanner: Scanner::new(source),
-        }
+impl Parser {
+    pub fn new(source: &'static str) -> Parser {
+        Parser { source }
     }
 
-    pub fn parse(&mut self) -> miette::Result<Vec<Ast>> {
-        let tokens = &self.scanner.scan()?;
+    pub fn parse(&mut self) -> anyhow::Result<Vec<Ast>> {
+        let tokens = Scanner::scan(self.source)?;
         if tokens.is_empty() {
             return Ok(vec![]);
         }
@@ -201,7 +194,7 @@ impl Parser<'_> {
         Parser::program(&mut tokens.iter().peekable())
     }
 
-    fn program(tokens: &mut PeekableTokenIter) -> miette::Result<Vec<Ast>> {
+    fn program(tokens: &mut PeekableTokenIter) -> anyhow::Result<Vec<Ast>> {
         let mut ast: Vec<Ast> = Vec::new();
 
         while let Some(_token) = tokens.peek() {
@@ -212,17 +205,17 @@ impl Parser<'_> {
         Ok(ast)
     }
 
-    fn statement(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn statement(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("statement: {:?}", tokens.peek());
         if let Some(token) = tokens.peek() {
             match token.lexeme {
                 // left brace token indicates block start
-                crate::token::TokenType::LeftBrace => Parser::parse_block(tokens),
-                crate::token::TokenType::For => Parser::for_stmt(tokens),
-                crate::token::TokenType::If => Parser::if_stmt(tokens),
-                crate::token::TokenType::Print => Parser::print_stmt(tokens),
-                crate::token::TokenType::Return => Parser::return_stmt(tokens),
-                crate::token::TokenType::While => Parser::while_stmt(tokens),
+                crate::token::Lexeme::LeftBrace => Parser::parse_block(tokens),
+                crate::token::Lexeme::For => Parser::for_stmt(tokens),
+                crate::token::Lexeme::If => Parser::if_stmt(tokens),
+                crate::token::Lexeme::Print => Parser::print_stmt(tokens),
+                crate::token::Lexeme::Return => Parser::return_stmt(tokens),
+                crate::token::Lexeme::While => Parser::while_stmt(tokens),
                 _ => Parser::expression_statement(tokens),
             }
         } else {
@@ -231,50 +224,44 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_block(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn parse_block(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("block_stmt: {:?}", tokens.peek());
         todo!("parse block")
     }
 
-    fn for_stmt(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn for_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("for_stmt: {:?}", tokens.peek());
         todo!("parse for stmt")
     }
 
-    fn if_stmt(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn if_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("if_stmt: {:?}", tokens.peek());
         todo!("parse if stmt")
     }
 
-    fn print_stmt(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn print_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("print_stmt: {:?}", tokens.peek());
 
         let print_token = tokens.next().unwrap();
-        assert_eq!(TokenType::Print, print_token.lexeme);
+        assert_eq!(Lexeme::Print, print_token.lexeme);
 
         let expr = Parser::expression(tokens)?;
-        if tokens
-            .next_if(|t| t.lexeme == TokenType::SemiColon)
-            .is_some()
-        {
+        if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
             Ok(Ast {
                 ty: AstType::PrintStatement(Box::new(expr)),
             })
         } else if tokens.peek().is_some() {
-            ast_expected_token!(print_token, TokenType::SemiColon)
+            ast_expected_token!(print_token, Lexeme::SemiColon)
         } else {
             Err(ParseError::UnexpectedEof.into())
         }
     }
 
-    fn return_stmt(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn return_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("return_stmt: {:?}", tokens.peek());
-        assert_eq!(TokenType::Return, tokens.next().unwrap().lexeme);
+        assert_eq!(Lexeme::Return, tokens.next().unwrap().lexeme);
 
-        if tokens
-            .next_if(|t| t.lexeme == TokenType::SemiColon)
-            .is_some()
-        {
+        if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
             // a 'return' without expression i.e. "return;"
             Ok(Ast {
                 ty: AstType::ReturnStatement(None),
@@ -282,65 +269,57 @@ impl Parser<'_> {
         } else if tokens.peek().is_some_and(|t| {
             !matches!(
                 t.lexeme,
-                TokenType::LeftBrace
-                    | TokenType::For
-                    | TokenType::While
-                    | TokenType::If
-                    | TokenType::Print
-                    | TokenType::Return
+                Lexeme::LeftBrace
+                    | Lexeme::For
+                    | Lexeme::While
+                    | Lexeme::If
+                    | Lexeme::Print
+                    | Lexeme::Return
             )
         }) {
             let ast = Parser::expression(tokens)?;
-            if tokens
-                .next_if(|t| t.lexeme == TokenType::SemiColon)
-                .is_some()
-            {
+            if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
                 Ok(Ast {
                     ty: AstType::ReturnStatement(Some(Box::new(ast))),
                 })
             } else if tokens.peek().is_some() {
-                ast_expected_token!(tokens.peek().unwrap(), TokenType::SemiColon)
+                ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
             } else {
-                Err(ast_missing_token!(TokenType::SemiColon, TokenType::Eof))
+                Err(ast_missing_token!(Lexeme::SemiColon, Lexeme::Eof))
             }
         } else {
-            Err(ast_missing_token!(TokenType::SemiColon, TokenType::Eof))
+            Err(ast_missing_token!(Lexeme::SemiColon, Lexeme::Eof))
         }
     }
 
-    fn while_stmt(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn while_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("while_stmt: {:?}", tokens.peek());
         todo!("parse while stmt")
     }
 
-    fn expression_statement(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn expression_statement(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         let token = tokens.peek();
         trace!("expr_stmt: {:?}", token);
         let ast = Parser::expression(tokens)?;
-        if tokens
-            .next_if(|t| t.lexeme == TokenType::SemiColon)
-            .is_some()
-        {
+        if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
             Ok(ast)
         } else if tokens.peek().is_some() {
-            ast_expected_token!(tokens.peek().unwrap(), TokenType::SemiColon)
+            ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
         } else {
-            Err(ast_missing_token!(TokenType::SemiColon, TokenType::Eof))
+            Err(ast_missing_token!(Lexeme::SemiColon, Lexeme::Eof))
         }
     }
 
-    fn expression(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn expression(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("expr: {:?}", tokens.peek());
         Parser::equality(tokens)
     }
 
-    fn equality(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn equality(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("equality: {:?}", tokens.peek());
         let mut left = Parser::comparison(tokens)?;
 
-        while let Some(t) =
-            tokens.next_if(|t| matches!(t.lexeme, TokenType::BangEq | TokenType::EqEq))
-        {
+        while let Some(t) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::BangEq | Lexeme::EqEq)) {
             let right = Parser::comparison(tokens)?;
             let op = ast_terminal!(t);
             left = ast_binary!(op, left, right);
@@ -349,14 +328,14 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn comparison(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn comparison(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("comparison: {:?}", tokens.peek());
         let mut left = Parser::term(tokens)?;
 
         while let Some(t) = tokens.next_if(|t| {
             matches!(
                 t.lexeme,
-                TokenType::Greater | TokenType::GreaterEq | TokenType::Less | TokenType::LessEq
+                Lexeme::Greater | Lexeme::GreaterEq | Lexeme::Less | Lexeme::LessEq
             )
         }) {
             let right = Parser::term(tokens)?;
@@ -367,13 +346,11 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn term(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn term(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("term: {:?}", tokens.peek());
         let mut left = Parser::factor(tokens)?;
 
-        while let Some(t) =
-            tokens.next_if(|t| matches!(t.lexeme, TokenType::Plus | TokenType::Minus))
-        {
+        while let Some(t) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::Plus | Lexeme::Minus)) {
             let right = Parser::factor(tokens)?;
             let op = ast_terminal!(t);
             left = ast_binary!(op, left, right);
@@ -382,13 +359,11 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn factor(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn factor(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("factor: {:?}", tokens.peek());
         let mut left = Parser::unary(tokens)?;
 
-        while let Some(t) =
-            tokens.next_if(|t| matches!(t.lexeme, TokenType::Star | TokenType::Slash))
-        {
+        while let Some(t) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::Star | Lexeme::Slash)) {
             let right = Parser::unary(tokens)?;
             let op = ast_terminal!(t);
             left = ast_binary!(op, left, right);
@@ -397,10 +372,9 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn unary(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn unary(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("unary: {:?}", tokens.peek());
-        if let Some(t) = tokens.next_if(|t| matches!(t.lexeme, TokenType::Minus | TokenType::Bang))
-        {
+        if let Some(t) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::Minus | Lexeme::Bang)) {
             let right = Parser::unary(tokens)?;
             Ok(ast_unary!(t, right))
         } else {
@@ -408,25 +382,21 @@ impl Parser<'_> {
         }
     }
 
-    fn primary(tokens: &mut PeekableTokenIter) -> miette::Result<Ast> {
+    fn primary(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("primary: {:?}", tokens.peek());
-        if let Some(token) = tokens.next_if(|t| {
-            matches!(
-                t.lexeme,
-                TokenType::True | TokenType::False | TokenType::Nil
-            )
-        }) {
+        if let Some(token) =
+            tokens.next_if(|t| matches!(t.lexeme, Lexeme::True | Lexeme::False | Lexeme::Nil))
+        {
             Ok(ast_terminal!(token))
-        } else if let Some(_left_paren) =
-            tokens.next_if(|t| matches!(t.lexeme, TokenType::LeftParen))
+        } else if let Some(_left_paren) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::LeftParen))
         {
             let expr = Parser::expression(tokens)?;
-            if let Some(_right_paren) = tokens.next_if(|t| t.lexeme == TokenType::RightParen) {
+            if let Some(_right_paren) = tokens.next_if(|t| t.lexeme == Lexeme::RightParen) {
                 Ok(ast_group!(expr))
             } else if tokens.peek().is_some() {
                 // something other than a closing ')'
                 Err(ParseError::MissingToken {
-                    expected: TokenType::RightParen,
+                    expected: Lexeme::RightParen,
                     actual: tokens.next().unwrap().lexeme.clone(),
                 }
                 .into())
@@ -436,7 +406,7 @@ impl Parser<'_> {
         } else if let Some(token) = tokens.next_if(|t| {
             matches!(
                 t.lexeme,
-                TokenType::Number { .. } | TokenType::String { .. } | TokenType::Identifier { .. }
+                Lexeme::Number { .. } | Lexeme::String { .. } | Lexeme::Identifier { .. }
             )
         }) {
             Ok(ast_terminal!(token.clone()))

@@ -6,11 +6,11 @@ use crate::span::Span;
 #[derive(Error, Debug)]
 pub enum TokenError {
     #[error("[line {}] Error: Unexpected character: {}", .span.line(), .ch) ]
-    InvalidToken { ch: &'static str, span: Span },
+    InvalidToken { ch: String, span: Span },
 
     #[error("[line {}] Error: Unterminated string: {}", .span.line(),
     .src[.span.offset()..(.span.offset() + .span.len())].to_string())]
-    UnterminatedString { src: &'static str, span: Span },
+    UnterminatedString { src: String, span: Span },
 }
 
 #[derive(Clone, Debug)]
@@ -39,151 +39,93 @@ impl Display for Token {
     }
 }
 
-#[repr(transparent)]
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
-struct CharValue(char);
-#[repr(transparent)]
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
-struct StringValue(String);
-#[repr(transparent)]
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
-struct NumberValue(f64);
-
-trait ValueType: Clone {
-    type T;
-
-    fn value(&self) -> Self::T;
-}
-
-impl ValueType for CharValue {
-    type T = char;
-
-    fn value(&self) -> Self::T {
-        self.0
-    }
-}
-
-impl Display for CharValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl ValueType for StringValue {
-    type T = String;
-
-    fn value(&self) -> Self::T {
-        self.0.clone()
-    }
-}
-
-impl Display for StringValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl ValueType for NumberValue {
-    type T = f64;
-
-    fn value(&self) -> Self::T {
-        self.0
-    }
-}
-
-impl Display for NumberValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Lexeme {
     // keywords
-    True(StringValue),
-    False(StringValue),
-    Nil(StringValue),
-    And(StringValue),
-    Or(StringValue),
-    Class(StringValue),
-    For(StringValue),
-    Fun(StringValue),
-    If(StringValue),
-    Else(StringValue),
-    Return(StringValue),
-    Super(StringValue),
-    This(StringValue),
-    Var(StringValue),
-    While(StringValue),
-    Print(StringValue),
+    True(String),
+    False(String),
+    Nil(String),
+    And(String),
+    Or(String),
+    Class(String),
+    For(String),
+    Fun(String),
+    If(String),
+    Else(String),
+    Return(String),
+    Super(String),
+    This(String),
+    Var(String),
+    While(String),
+    Print(String),
 
     // literals
-    LeftParen(CharValue),
-    RightParen(CharValue),
-    LeftBrace(CharValue),
-    RightBrace(CharValue),
-    Comma(CharValue),
-    Dot(CharValue),
-    Minus(CharValue),
-    Plus(CharValue),
-    SemiColon(CharValue),
-    Star(CharValue),
-    Eq(CharValue),
-    EqEq(StringValue),
-    Bang(CharValue),
-    BangEq(StringValue),
-    Less(CharValue),
-    LessEq(StringValue),
-    Greater(CharValue),
-    GreaterEq(StringValue),
-    Slash(CharValue),
+    LeftParen(char),
+    RightParen(char),
+    LeftBrace(char),
+    RightBrace(char),
+    Comma(char),
+    Dot(char),
+    Minus(char),
+    Plus(char),
+    SemiColon(char),
+    Star(char),
+    Eq(char),
+    EqEq(String),
+    Bang(char),
+    BangEq(String),
+    Less(char),
+    LessEq(String),
+    Greater(char),
+    GreaterEq(String),
+    Slash(char),
 
     // value holders
-    Number(NumberValue),
-    Identifier(StringValue),
-    String(StringValue),
+    Number(f64),
+    Identifier(String),
+    String(String),
 
     // symbolic placeholder
     Eof,
 }
 
-impl From<&'static str> for Lexeme {
-    fn from(value: &'static str) -> Self {
+impl From<&str> for Lexeme {
+    fn from(value: &str) -> Self {
         match value {
-            "(" => Lexeme::RightParen(CharValue('(')),
-            ")" => Lexeme::LeftParen(CharValue(')')),
-            "{" => Lexeme::RightBrace(CharValue('{')),
-            "}" => Lexeme::LeftBrace(CharValue('}')),
-            "," => Lexeme::Comma(CharValue(',')),
-            "." => Lexeme::Dot(CharValue('.')),
-            ";" => Lexeme::SemiColon(CharValue(';')),
-            "+" => Lexeme::Plus(CharValue('+')),
-            "-" => Lexeme::Minus(CharValue('-')),
-            "*" => Lexeme::Star(CharValue('*')),
-            "/" => Lexeme::Slash(CharValue('/')),
-            "=" => Lexeme::Eq(CharValue('=')),
-            "!" => Lexeme::Bang(CharValue('!')),
-            "<" => Lexeme::Less(CharValue('<')),
-            ">" => Lexeme::Greater(CharValue('>')),
-            "==" => Lexeme::EqEq(StringValue("==".to_string())),
-            "!=" => Lexeme::BangEq(StringValue("!=".to_string())),
-            "<=" => Lexeme::LessEq(StringValue("<=".to_string())),
-            ">=" => Lexeme::GreaterEq(StringValue(">=".to_string())),
-            "print" => Lexeme::Print(StringValue("PRINT".to_string())),
-            "true" => Lexeme::True(StringValue("TRUE".to_string())),
-            "false" => Lexeme::False(StringValue("FALSE".to_string())),
-            "nil" => Lexeme::Nil(StringValue("NIL".to_string())),
-            "and" => Lexeme::And(StringValue("AND".to_string())),
-            "or" => Lexeme::Or(StringValue("OR".to_string())),
-            "fun" => Lexeme::Fun(StringValue("FUN".to_string())),
-            "return" => Lexeme::Return(StringValue("RETURN".to_string())),
-            "if" => Lexeme::If(StringValue("IF".to_string())),
-            "else" => Lexeme::Else(StringValue("ELSE".to_string())),
-            "for" => Lexeme::For(StringValue("FOR".to_string())),
-            "while" => Lexeme::While(StringValue("WHILE".to_string())),
-            "class" => Lexeme::Class(StringValue("CLASS".to_string())),
-            "super" => Lexeme::Super(StringValue("SUPER".to_string())),
-            "this" => Lexeme::This(StringValue("THIS".to_string())),
+            "(" => Lexeme::RightParen('('),
+            ")" => Lexeme::LeftParen(')'),
+            "{" => Lexeme::RightBrace('{'),
+            "}" => Lexeme::LeftBrace('}'),
+            "," => Lexeme::Comma(','),
+            "." => Lexeme::Dot('.'),
+            ";" => Lexeme::SemiColon(';'),
+            "+" => Lexeme::Plus('+'),
+            "-" => Lexeme::Minus('-'),
+            "*" => Lexeme::Star('*'),
+            "/" => Lexeme::Slash('/'),
+            "=" => Lexeme::Eq('='),
+            "!" => Lexeme::Bang('!'),
+            "<" => Lexeme::Less('<'),
+            ">" => Lexeme::Greater('>'),
+            "==" => Lexeme::EqEq("==".to_string()),
+            "!=" => Lexeme::BangEq("!=".to_string()),
+            "<=" => Lexeme::LessEq("<=".to_string()),
+            ">=" => Lexeme::GreaterEq(">=".to_string()),
+            "print" => Lexeme::Print("PRINT".to_string()),
+            "true" => Lexeme::True("TRUE".to_string()),
+            "false" => Lexeme::False("FALSE".to_string()),
+            "nil" => Lexeme::Nil("NIL".to_string()),
+            "and" => Lexeme::And("AND".to_string()),
+            "or" => Lexeme::Or("OR".to_string()),
+            "fun" => Lexeme::Fun("FUN".to_string()),
+            "return" => Lexeme::Return("RETURN".to_string()),
+            "if" => Lexeme::If("IF".to_string()),
+            "else" => Lexeme::Else("ELSE".to_string()),
+            "for" => Lexeme::For("FOR".to_string()),
+            "while" => Lexeme::While("WHILE".to_string()),
+            "class" => Lexeme::Class("CLASS".to_string()),
+            "super" => Lexeme::Super("SUPER".to_string()),
+            "this" => Lexeme::This("THIS".to_string()),
             _ => panic!("invalid token {value}"),
         }
     }
@@ -241,17 +183,23 @@ impl Token {
     }
 }
 
-fn strip_suffix(s: &String, p: &str) -> String {
-    s.strip_suffix(p).unwrap_or(s.as_str()).to_string()
+fn strip_suffix(s: &str, p: &str) -> String {
+    s.strip_suffix(p).unwrap_or(s).to_string()
 }
 
-pub struct Scanner;
+pub struct Scanner<'scanner> {
+    source: &'scanner str,
+}
 
-impl Scanner {
-    pub fn scan(source: &'static str) -> anyhow::Result<Vec<Token>> {
+impl<'scanner> Scanner<'scanner> {
+    pub fn new(source: &'scanner str) -> Self {
+        Scanner { source }
+    }
+
+    pub fn scan(self) -> anyhow::Result<Vec<Token>> {
         let mut line: usize = 1;
         let mut tokens: Vec<Token> = Vec::new();
-        let mut peekable_iter = source.char_indices().peekable();
+        let mut peekable_iter = self.source.char_indices().peekable();
 
         #[allow(clippy::while_let_loop)]
         loop {
@@ -317,17 +265,15 @@ impl Scanner {
 
                         if peekable_iter.peek().is_none() {
                             return Err(TokenError::UnterminatedString {
-                                src: source.as_str(),
+                                src: self.source.to_string(),
                                 span: Span::new(line, i, str.len()),
                             }
                             .into());
                         } else {
                             // consume terminating "
                             let (l, _) = peekable_iter.next().unwrap();
-                            tokens.push(Token::new(
-                                Lexeme::String(StringValue(str)),
-                                (line, i + 1, l - 1).into(),
-                            ))
+                            tokens
+                                .push(Token::new(Lexeme::String(str), (line, i + 1, l - 1).into()))
                         }
                     }
                     c if c.is_ascii_digit() => {
@@ -380,7 +326,7 @@ impl Scanner {
                             Ok(value) => value,
                             Err(_e) => {
                                 return Err(TokenError::InvalidToken {
-                                    ch: number.clone().as_str(),
+                                    ch: number.clone(),
                                     span: Span::new(line, i, num_literal.len()),
                                 }
                                 .into());
@@ -388,7 +334,7 @@ impl Scanner {
                         };
 
                         tokens.push(Token::new(
-                            Lexeme::Number(NumberValue(value)),
+                            Lexeme::Number(value),
                             (line, i, num_literal.len()).into(),
                         ))
                     }
@@ -402,12 +348,12 @@ impl Scanner {
                             s.push(ch);
                         }
 
-                        if let Some(keyword) = keyword_token(s.to_lowercase().as_str()) {
+                        if let Some(keyword) = keyword_token(&s) {
                             tokens.push(Token::new(keyword, (line, i, s.len()).into()))
                         } else {
                             let len = s.len();
                             tokens.push(Token::new(
-                                Lexeme::Identifier(StringValue(s)),
+                                Lexeme::Identifier(s.clone()),
                                 (line, i, len).into(),
                             ));
                         }
@@ -427,7 +373,7 @@ impl Scanner {
                     }
                     _ => {
                         return Err(TokenError::InvalidToken {
-                            ch: source,
+                            ch: self.source.to_string(),
                             span: Span::new(line, i, 1),
                         }
                         .into());
@@ -443,10 +389,11 @@ impl Scanner {
     }
 }
 
-fn keyword_token(s: &'static str) -> Option<Lexeme> {
-    match s {
+fn keyword_token(s: &String) -> Option<Lexeme> {
+    let word = s.as_str();
+    match word {
         "true" | "false" | "nil" | "and" | "or" | "class" | "for" | "fun" | "if" | "else"
-        | "return" | "super" | "this" | "var" | "while" | "print" => Some(s.into()),
+        | "return" | "super" | "this" | "var" | "while" | "print" => Some(word.into()),
         _ => None,
     }
 }

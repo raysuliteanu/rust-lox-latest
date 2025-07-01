@@ -186,7 +186,8 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> anyhow::Result<Vec<Ast>> {
-        let tokens = Scanner::scan(self.source)?;
+        let scanner = Scanner::new(self.source);
+        let tokens = scanner.scan()?;
         if tokens.is_empty() {
             return Ok(vec![]);
         }
@@ -210,12 +211,12 @@ impl Parser {
         if let Some(token) = tokens.peek() {
             match token.lexeme {
                 // left brace token indicates block start
-                crate::token::Lexeme::LeftBrace => Parser::parse_block(tokens),
-                crate::token::Lexeme::For => Parser::for_stmt(tokens),
-                crate::token::Lexeme::If => Parser::if_stmt(tokens),
-                crate::token::Lexeme::Print => Parser::print_stmt(tokens),
-                crate::token::Lexeme::Return => Parser::return_stmt(tokens),
-                crate::token::Lexeme::While => Parser::while_stmt(tokens),
+                crate::token::Lexeme::LeftBrace(_) => Parser::parse_block(tokens),
+                crate::token::Lexeme::For(_) => Parser::for_stmt(tokens),
+                crate::token::Lexeme::If(_) => Parser::if_stmt(tokens),
+                crate::token::Lexeme::Print(_) => Parser::print_stmt(tokens),
+                crate::token::Lexeme::Return(_) => Parser::return_stmt(tokens),
+                crate::token::Lexeme::While(_) => Parser::while_stmt(tokens),
                 _ => Parser::expression_statement(tokens),
             }
         } else {
@@ -243,15 +244,17 @@ impl Parser {
         trace!("print_stmt: {:?}", tokens.peek());
 
         let print_token = tokens.next().unwrap();
-        assert_eq!(Lexeme::Print, print_token.lexeme);
 
         let expr = Parser::expression(tokens)?;
-        if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
+        if tokens
+            .next_if(|t| t.lexeme == Lexeme::SemiColon(';'))
+            .is_some()
+        {
             Ok(Ast {
                 ty: AstType::PrintStatement(Box::new(expr)),
             })
         } else if tokens.peek().is_some() {
-            ast_expected_token!(print_token, Lexeme::SemiColon)
+            ast_expected_token!(print_token, Lexeme::SemiColon(';'))
         } else {
             Err(ParseError::UnexpectedEof.into())
         }
@@ -259,9 +262,11 @@ impl Parser {
 
     fn return_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("return_stmt: {:?}", tokens.peek());
-        assert_eq!(Lexeme::Return, tokens.next().unwrap().lexeme);
 
-        if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
+        if tokens
+            .next_if(|t| t.lexeme == Lexeme::SemiColon(';'))
+            .is_some()
+        {
             // a 'return' without expression i.e. "return;"
             Ok(Ast {
                 ty: AstType::ReturnStatement(None),
@@ -269,26 +274,29 @@ impl Parser {
         } else if tokens.peek().is_some_and(|t| {
             !matches!(
                 t.lexeme,
-                Lexeme::LeftBrace
-                    | Lexeme::For
-                    | Lexeme::While
-                    | Lexeme::If
-                    | Lexeme::Print
-                    | Lexeme::Return
+                Lexeme::LeftBrace(_)
+                    | Lexeme::For(_)
+                    | Lexeme::While(_)
+                    | Lexeme::If(_)
+                    | Lexeme::Print(_)
+                    | Lexeme::Return(_)
             )
         }) {
             let ast = Parser::expression(tokens)?;
-            if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
+            if tokens
+                .next_if(|t| t.lexeme == Lexeme::SemiColon(';'))
+                .is_some()
+            {
                 Ok(Ast {
                     ty: AstType::ReturnStatement(Some(Box::new(ast))),
                 })
             } else if tokens.peek().is_some() {
-                ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
+                ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon(';'))
             } else {
-                Err(ast_missing_token!(Lexeme::SemiColon, Lexeme::Eof))
+                Err(ast_missing_token!(Lexeme::SemiColon(';'), Lexeme::Eof))
             }
         } else {
-            Err(ast_missing_token!(Lexeme::SemiColon, Lexeme::Eof))
+            Err(ast_missing_token!(Lexeme::SemiColon(';'), Lexeme::Eof))
         }
     }
 
@@ -301,12 +309,15 @@ impl Parser {
         let token = tokens.peek();
         trace!("expr_stmt: {:?}", token);
         let ast = Parser::expression(tokens)?;
-        if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
+        if tokens
+            .next_if(|t| t.lexeme == Lexeme::SemiColon(';'))
+            .is_some()
+        {
             Ok(ast)
         } else if tokens.peek().is_some() {
-            ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
+            ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon(';'))
         } else {
-            Err(ast_missing_token!(Lexeme::SemiColon, Lexeme::Eof))
+            Err(ast_missing_token!(Lexeme::SemiColon(';'), Lexeme::Eof))
         }
     }
 
@@ -319,7 +330,9 @@ impl Parser {
         trace!("equality: {:?}", tokens.peek());
         let mut left = Parser::comparison(tokens)?;
 
-        while let Some(t) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::BangEq | Lexeme::EqEq)) {
+        while let Some(t) =
+            tokens.next_if(|t| matches!(t.lexeme, Lexeme::BangEq(_) | Lexeme::EqEq(_)))
+        {
             let right = Parser::comparison(tokens)?;
             let op = ast_terminal!(t);
             left = ast_binary!(op, left, right);
@@ -335,7 +348,7 @@ impl Parser {
         while let Some(t) = tokens.next_if(|t| {
             matches!(
                 t.lexeme,
-                Lexeme::Greater | Lexeme::GreaterEq | Lexeme::Less | Lexeme::LessEq
+                Lexeme::Greater(_) | Lexeme::GreaterEq(_) | Lexeme::Less(_) | Lexeme::LessEq(_)
             )
         }) {
             let right = Parser::term(tokens)?;
@@ -350,7 +363,9 @@ impl Parser {
         trace!("term: {:?}", tokens.peek());
         let mut left = Parser::factor(tokens)?;
 
-        while let Some(t) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::Plus | Lexeme::Minus)) {
+        while let Some(t) =
+            tokens.next_if(|t| matches!(t.lexeme, Lexeme::Plus(_) | Lexeme::Minus(_)))
+        {
             let right = Parser::factor(tokens)?;
             let op = ast_terminal!(t);
             left = ast_binary!(op, left, right);
@@ -363,7 +378,9 @@ impl Parser {
         trace!("factor: {:?}", tokens.peek());
         let mut left = Parser::unary(tokens)?;
 
-        while let Some(t) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::Star | Lexeme::Slash)) {
+        while let Some(t) =
+            tokens.next_if(|t| matches!(t.lexeme, Lexeme::Star(_) | Lexeme::Slash(_)))
+        {
             let right = Parser::unary(tokens)?;
             let op = ast_terminal!(t);
             left = ast_binary!(op, left, right);
@@ -374,7 +391,8 @@ impl Parser {
 
     fn unary(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("unary: {:?}", tokens.peek());
-        if let Some(t) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::Minus | Lexeme::Bang)) {
+        if let Some(t) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::Minus(_) | Lexeme::Bang(_)))
+        {
             let right = Parser::unary(tokens)?;
             Ok(ast_unary!(t, right))
         } else {
@@ -384,19 +402,23 @@ impl Parser {
 
     fn primary(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("primary: {:?}", tokens.peek());
-        if let Some(token) =
-            tokens.next_if(|t| matches!(t.lexeme, Lexeme::True | Lexeme::False | Lexeme::Nil))
-        {
+        if let Some(token) = tokens.next_if(|t| {
+            matches!(
+                t.lexeme,
+                Lexeme::True(_) | Lexeme::False(_) | Lexeme::Nil(_)
+            )
+        }) {
             Ok(ast_terminal!(token))
-        } else if let Some(_left_paren) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::LeftParen))
+        } else if let Some(_left_paren) =
+            tokens.next_if(|t| matches!(t.lexeme, Lexeme::LeftParen('(')))
         {
             let expr = Parser::expression(tokens)?;
-            if let Some(_right_paren) = tokens.next_if(|t| t.lexeme == Lexeme::RightParen) {
+            if let Some(_right_paren) = tokens.next_if(|t| t.lexeme == Lexeme::RightParen(')')) {
                 Ok(ast_group!(expr))
             } else if tokens.peek().is_some() {
                 // something other than a closing ')'
                 Err(ParseError::MissingToken {
-                    expected: Lexeme::RightParen,
+                    expected: Lexeme::RightParen(')'),
                     actual: tokens.next().unwrap().lexeme.clone(),
                 }
                 .into())

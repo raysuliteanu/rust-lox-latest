@@ -38,14 +38,15 @@ fn main() -> Result<ExitCode> {
         LoxCommands::Tokenize => {
             if let Some(file) = lox.filename {
                 let source = get_source(file)?;
-                let _ = Scanner::scan(&source)?;
+                let scanner = Scanner::new(&source);
+                let _tokens = scanner.scan()?;
             } else {
                 // TODO: usage error, filename required
             }
         }
         LoxCommands::Parse => {
             if let Some(file) = lox.filename {
-                let source = get_source(file)?;
+                let _source = get_source(file)?;
             } else {
                 // TODO: usage error, filename required
             }
@@ -53,7 +54,7 @@ fn main() -> Result<ExitCode> {
 
         LoxCommands::Evaluate => {
             if let Some(file) = lox.filename {
-                let source = get_source(file)?;
+                let _source = get_source(file)?;
             } else {
                 // TODO: usage error, filename required
             }
@@ -61,7 +62,7 @@ fn main() -> Result<ExitCode> {
 
         LoxCommands::Run => {
             if let Some(file) = lox.filename {
-                let source = get_source(file)?;
+                let _source = get_source(file)?;
             } else {
                 repl();
             }

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use log::trace;
 use parser::Ast;
 use std::{
     fs,
@@ -18,15 +19,14 @@ mod token;
 struct Lox {
     #[command(subcommand)]
     commands: LoxCommands,
-    filename: Option<String>,
 }
 
 #[derive(Subcommand)]
 enum LoxCommands {
-    Tokenize,
-    Parse,
-    Evaluate,
-    Run,
+    Tokenize { filename: Option<String> },
+    Parse { filename: Option<String> },
+    Evaluate { filename: Option<String> },
+    Run { filename: Option<String> },
 }
 
 fn main() -> Result<ExitCode> {
@@ -35,8 +35,8 @@ fn main() -> Result<ExitCode> {
     let lox = Lox::parse();
 
     match lox.commands {
-        LoxCommands::Tokenize => {
-            if let Some(file) = lox.filename {
+        LoxCommands::Tokenize { filename } => {
+            if let Some(file) = filename {
                 let source = get_source(file)?;
                 let scanner = Scanner::new(&source);
                 let _tokens = scanner.scan()?;
@@ -44,24 +44,24 @@ fn main() -> Result<ExitCode> {
                 // TODO: usage error, filename required
             }
         }
-        LoxCommands::Parse => {
-            if let Some(file) = lox.filename {
+        LoxCommands::Parse { filename } => {
+            if let Some(file) = filename {
                 let _source = get_source(file)?;
             } else {
                 // TODO: usage error, filename required
             }
         }
 
-        LoxCommands::Evaluate => {
-            if let Some(file) = lox.filename {
+        LoxCommands::Evaluate { filename } => {
+            if let Some(file) = filename {
                 let _source = get_source(file)?;
             } else {
                 // TODO: usage error, filename required
             }
         }
 
-        LoxCommands::Run => {
-            if let Some(file) = lox.filename {
+        LoxCommands::Run { filename } => {
+            if let Some(file) = filename {
                 let _source = get_source(file)?;
             } else {
                 let _ = repl();
@@ -93,6 +93,7 @@ pub fn repl() -> anyhow::Result<Vec<Ast>> {
 }
 
 fn get_source(filename: String) -> anyhow::Result<String> {
+    trace!("get_source({filename})");
     let source = fs::read_to_string(PathBuf::from(&filename)).with_context(|| filename)?;
 
     Ok(source)

@@ -64,7 +64,7 @@ fn main() -> Result<ExitCode> {
             if let Some(file) = lox.filename {
                 let _source = get_source(file)?;
             } else {
-                repl();
+                let _ = repl();
             }
         }
     }

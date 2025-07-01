@@ -389,11 +389,10 @@ impl<'scanner> Scanner<'scanner> {
     }
 }
 
-fn keyword_token(s: &String) -> Option<Lexeme> {
-    let word = s.as_str();
-    match word {
+fn keyword_token(s: &str) -> Option<Lexeme> {
+    match s {
         "true" | "false" | "nil" | "and" | "or" | "class" | "for" | "fun" | "if" | "else"
-        | "return" | "super" | "this" | "var" | "while" | "print" => Some(word.into()),
+        | "return" | "super" | "this" | "var" | "while" | "print" => Some(s.into()),
         _ => None,
     }
 }

@@ -45,7 +45,13 @@ fn main() -> Result<ExitCode> {
                 .for_each(|t| println!("{t}"));
         }
         LoxCommands::Parse { filename } => {
-            let _source = get_source(filename)?;
+            let source = get_source(filename)?;
+            parser::Parser::new(&source)
+                .parse()
+                .map_err(|e| eprintln!("{e}"))
+                .iter()
+                .flatten()
+                .for_each(|ast| println!("{ast}"));
         }
 
         LoxCommands::Evaluate { filename } => {

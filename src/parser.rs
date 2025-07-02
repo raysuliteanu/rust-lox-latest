@@ -60,12 +60,55 @@ impl Display for AstType {
             AstType::Group(ast) => {
                 write!(f, "(group {ast})")
             }
-            AstType::Expression(e) => {
-                write!(f, "({e})")
-            }
-            AstType::Terminal(t) => {
-                write!(f, "{}", t.lexeme)
-            }
+            AstType::Expression(e) => match e {
+                ExpressionType::Unary { op, exp } => {
+                    write!(f, "({op} {exp})")
+                }
+                ExpressionType::Binary { op, left, right } => {
+                    write!(f, "({op} {left} {right})")
+                }
+            },
+            AstType::Terminal(t) => match &t.lexeme {
+                Lexeme::True(v)
+                | Lexeme::False(v)
+                | Lexeme::Nil(v)
+                | Lexeme::And(v)
+                | Lexeme::Or(v)
+                | Lexeme::Class(v)
+                | Lexeme::For(v)
+                | Lexeme::Fun(v)
+                | Lexeme::If(v)
+                | Lexeme::Else(v)
+                | Lexeme::Return(v)
+                | Lexeme::Super(v)
+                | Lexeme::This(v)
+                | Lexeme::Var(v)
+                | Lexeme::While(v)
+                | Lexeme::Print(v)
+                | Lexeme::EqEq(v)
+                | Lexeme::BangEq(v)
+                | Lexeme::LessEq(v)
+                | Lexeme::GreaterEq(v)
+                | Lexeme::Identifier(v)
+                | Lexeme::String(v) => write!(f, "{v}"),
+                Lexeme::LeftParen(v)
+                | Lexeme::RightParen(v)
+                | Lexeme::LeftBrace(v)
+                | Lexeme::RightBrace(v)
+                | Lexeme::Comma(v)
+                | Lexeme::Dot(v)
+                | Lexeme::Minus(v)
+                | Lexeme::Plus(v)
+                | Lexeme::SemiColon(v)
+                | Lexeme::Star(v)
+                | Lexeme::Eq(v)
+                | Lexeme::Bang(v)
+                | Lexeme::Less(v)
+                | Lexeme::Greater(v)
+                | Lexeme::Slash(v) => write!(f, "{v}"),
+                Lexeme::Number(_, v) => write!(f, "{v}"),
+                Lexeme::Eof(_) => unreachable!(),
+            },
         }
     }
 }
@@ -106,10 +149,6 @@ pub enum ParseError {
 
     #[error("Unexpected EOF")]
     UnexpectedEof,
-}
-
-pub struct Parser {
-    source: &'static str,
 }
 
 macro_rules! ast_missing_token {
@@ -180,8 +219,12 @@ macro_rules! ast_terminal {
     };
 }
 
-impl Parser {
-    pub fn new(source: &'static str) -> Parser {
+pub struct Parser<'parser> {
+    source: &'parser str,
+}
+
+impl<'parser> Parser<'parser> {
+    pub fn new(source: &'parser str) -> Parser<'parser> {
         Parser { source }
     }
 
@@ -198,7 +241,9 @@ impl Parser {
     fn program(tokens: &mut PeekableTokenIter) -> anyhow::Result<Vec<Ast>> {
         let mut ast: Vec<Ast> = Vec::new();
 
-        while let Some(_token) = tokens.peek() {
+        while let Some(token) = tokens.peek()
+            && token.lexeme != "eof".into()
+        {
             let statement = Parser::statement(tokens)?;
             ast.push(statement);
         }

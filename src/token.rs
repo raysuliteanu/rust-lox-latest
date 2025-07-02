@@ -1,4 +1,3 @@
-use log::trace;
 use std::fmt::Display;
 use thiserror::Error;
 
@@ -33,10 +32,13 @@ impl Display for Token {
             Lexeme::String(value) => {
                 write!(f, "{lexeme} \"{value}\" {value}")
             }
-            Lexeme::Number(value) => {
-                let val_as_str = format!("{value}");
-                let trimmed = strip_suffix(&val_as_str, ".0");
-                write!(f, "{lexeme} {trimmed} {value}")
+            Lexeme::Number(raw, value) => {
+                if *value == value.trunc() {
+                    // tests require that integers are printed as N.0
+                    write!(f, "NUMBER {raw} {value}.0")
+                } else {
+                    write!(f, "NUMBER {raw} {value}")
+                }
             }
             Lexeme::Identifier(value) => {
                 write!(f, "{lexeme} {value} null")
@@ -128,7 +130,7 @@ pub enum Lexeme {
     Slash(char),
 
     // value holders
-    Number(f64),
+    Number(String, f64),
     Identifier(String),
     String(String),
 
@@ -183,7 +185,7 @@ impl From<&str> for Lexeme {
 impl Display for Lexeme {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Lexeme::Number(_) => write!(f, "NUMBER"),
+            Lexeme::Number(_, _) => write!(f, "NUMBER"),
             Lexeme::Identifier(_) => write!(f, "IDENTIFIER"),
             Lexeme::String(_) => write!(f, "STRING"),
             Lexeme::LeftParen(_) => write!(f, "LEFT_PAREN"),
@@ -224,10 +226,6 @@ impl Display for Lexeme {
             | Lexeme::Eof(v) => write!(f, "{v}"),
         }
     }
-}
-
-fn strip_suffix(s: &str, p: &str) -> String {
-    s.strip_suffix(p).unwrap_or(s).to_string()
 }
 
 pub struct Scanner<'scanner> {
@@ -365,7 +363,7 @@ impl<'scanner> Scanner<'scanner> {
                             _ => {}
                         }
 
-                        let value: f64 = match num_literal.parse() {
+                        let num = match num_literal.parse::<f64>() {
                             Ok(value) => value,
                             Err(_e) => {
                                 return Err(TokenError::InvalidToken {
@@ -376,10 +374,8 @@ impl<'scanner> Scanner<'scanner> {
                             }
                         };
 
-                        trace!("parsed number: {value}");
-
                         tokens.push(Token::new(
-                            Lexeme::Number(value),
+                            Lexeme::Number(num_literal.to_string(), num),
                             (line, i, num_literal.len()).into(),
                         ))
                     }

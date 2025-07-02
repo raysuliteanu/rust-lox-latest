@@ -252,46 +252,46 @@ impl<'scanner> Scanner<'scanner> {
                         continue;
                     }
                     c if c.is_whitespace() => continue,
-                    '(' => tokens.push(Token::new("(".into(), (line, i, 1).into())),
-                    ')' => tokens.push(Token::new(")".into(), (line, i, 1).into())),
-                    '{' => tokens.push(Token::new("{".into(), (line, i, 1).into())),
-                    '}' => tokens.push(Token::new("}".into(), (line, i, 1).into())),
-                    ',' => tokens.push(Token::new(",".into(), (line, i, 1).into())),
-                    '.' => tokens.push(Token::new(".".into(), (line, i, 1).into())),
-                    '+' => tokens.push(Token::new("+".into(), (line, i, 1).into())),
-                    '-' => tokens.push(Token::new("-".into(), (line, i, 1).into())),
-                    ';' => tokens.push(Token::new(";".into(), (line, i, 1).into())),
-                    '*' => tokens.push(Token::new("*".into(), (line, i, 1).into())),
+                    '(' => tokens.push(Token::new(lexeme_from("("), (line, i, 1).into())),
+                    ')' => tokens.push(Token::new(lexeme_from(")"), (line, i, 1).into())),
+                    '{' => tokens.push(Token::new(lexeme_from("{"), (line, i, 1).into())),
+                    '}' => tokens.push(Token::new(lexeme_from("}"), (line, i, 1).into())),
+                    ',' => tokens.push(Token::new(lexeme_from(","), (line, i, 1).into())),
+                    '.' => tokens.push(Token::new(lexeme_from("."), (line, i, 1).into())),
+                    '+' => tokens.push(Token::new(lexeme_from("+"), (line, i, 1).into())),
+                    '-' => tokens.push(Token::new(lexeme_from("-"), (line, i, 1).into())),
+                    ';' => tokens.push(Token::new(lexeme_from(";"), (line, i, 1).into())),
+                    '*' => tokens.push(Token::new(lexeme_from("*"), (line, i, 1).into())),
                     '=' => {
                         if peekable_iter.peek().is_some_and(|(_, l)| *l == '=') {
                             peekable_iter.next();
-                            tokens.push(Token::new("==".into(), (line, i, 2).into()))
+                            tokens.push(Token::new(lexeme_from("=="), (line, i, 2).into()))
                         } else {
-                            tokens.push(Token::new("=".into(), (line, i, 1).into()))
+                            tokens.push(Token::new(lexeme_from("="), (line, i, 1).into()))
                         }
                     }
                     '<' => {
                         if peekable_iter.peek().is_some_and(|(_, l)| *l == '=') {
                             peekable_iter.next();
-                            tokens.push(Token::new("<=".into(), (line, i, 2).into()))
+                            tokens.push(Token::new(lexeme_from("<="), (line, i, 2).into()))
                         } else {
-                            tokens.push(Token::new("<".into(), (line, i, 1).into()))
+                            tokens.push(Token::new(lexeme_from("<"), (line, i, 1).into()))
                         }
                     }
                     '>' => {
                         if peekable_iter.peek().is_some_and(|(_, l)| *l == '=') {
                             peekable_iter.next();
-                            tokens.push(Token::new(">=".into(), (line, i, 2).into()))
+                            tokens.push(Token::new(lexeme_from(">="), (line, i, 2).into()))
                         } else {
-                            tokens.push(Token::new(">".into(), (line, i, 1).into()))
+                            tokens.push(Token::new(lexeme_from(">"), (line, i, 1).into()))
                         }
                     }
                     '!' => {
                         if peekable_iter.peek().is_some_and(|(_, l)| *l == '=') {
                             peekable_iter.next();
-                            tokens.push(Token::new("!=".into(), (line, i, 2).into()))
+                            tokens.push(Token::new(lexeme_from("!="), (line, i, 2).into()))
                         } else {
-                            tokens.push(Token::new("!".into(), (line, i, 1).into()))
+                            tokens.push(Token::new(lexeme_from("!"), (line, i, 1).into()))
                         }
                     }
                     '\"' => {
@@ -410,7 +410,7 @@ impl<'scanner> Scanner<'scanner> {
                                 peekable_iter.next();
                             }
                         } else {
-                            tokens.push(Token::new("/".into(), (line, i, 1).into()))
+                            tokens.push(Token::new(lexeme_from("/"), (line, i, 1).into()))
                         }
                     }
                     _ => {
@@ -428,7 +428,7 @@ impl<'scanner> Scanner<'scanner> {
         }
 
         tokens.push(Token::new(
-            "eof".into(),
+            lexeme_from("eof"),
             Span::new(line, self.source.len(), 0),
         ));
 
@@ -436,10 +436,14 @@ impl<'scanner> Scanner<'scanner> {
     }
 }
 
+pub fn lexeme_from(s: &str) -> Lexeme {
+    s.into()
+}
+
 fn keyword_token(s: &str) -> Option<Lexeme> {
     match s {
         "true" | "false" | "nil" | "and" | "or" | "class" | "for" | "fun" | "if" | "else"
-        | "return" | "super" | "this" | "var" | "while" | "print" => Some(s.into()),
+        | "return" | "super" | "this" | "var" | "while" | "print" => Some(lexeme_from(s)),
         _ => None,
     }
 }

@@ -3,7 +3,7 @@ use std::{fmt::Display, iter::Peekable};
 use log::trace;
 use thiserror::Error;
 
-use crate::token::{Lexeme, Scanner, Token};
+use crate::token::{Lexeme, Scanner, Token, lexeme_from};
 
 type PeekableTokenIter<'a> = Peekable<std::slice::Iter<'a, Token>>;
 
@@ -242,19 +242,44 @@ impl<'parser> Parser<'parser> {
         let mut ast: Vec<Ast> = Vec::new();
 
         while let Some(token) = tokens.peek()
-            && token.lexeme != "eof".into()
+            && token.lexeme != lexeme_from("eof")
         {
-            let statement = Parser::statement(tokens)?;
+            let statement = Parser::declaration(tokens)?;
             ast.push(statement);
         }
 
         Ok(ast)
     }
 
-    fn statement(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
-        trace!("statement: {:?}", tokens.peek());
+    fn declaration(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         if let Some(token) = tokens.peek() {
             match token.lexeme {
+                Lexeme::Class(_) => Parser::class_decl(tokens),
+                Lexeme::Fun(_) => Parser::fun_decl(tokens),
+                Lexeme::Var(_) => Parser::var_decl(tokens),
+                _ => Parser::statement(tokens),
+            }
+        } else {
+            Err(ParseError::UnexpectedEof.into())
+        }
+    }
+
+    fn class_decl(_tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+        todo!("class decl")
+    }
+
+    fn fun_decl(_tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+        todo!("fun decl")
+    }
+
+    fn var_decl(_tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+        todo!("var decl")
+    }
+
+    fn statement(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+        trace!("statement: {:?}", tokens.peek());
+        let r = match tokens.peek() {
+            Some(token) => match token.lexeme {
                 // left brace token indicates block start
                 crate::token::Lexeme::LeftBrace(_) => Parser::parse_block(tokens),
                 crate::token::Lexeme::For(_) => Parser::for_stmt(tokens),
@@ -263,11 +288,10 @@ impl<'parser> Parser<'parser> {
                 crate::token::Lexeme::Return(_) => Parser::return_stmt(tokens),
                 crate::token::Lexeme::While(_) => Parser::while_stmt(tokens),
                 _ => Parser::expression_statement(tokens),
-            }
-        } else {
-            // TODO: I think this should never happen since in program() there's already a peek()
-            Err(ParseError::UnexpectedEof.into())
-        }
+            },
+            None => Err(ParseError::UnexpectedEof.into()),
+        }?;
+        Ok(r)
     }
 
     fn parse_block(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
@@ -291,12 +315,12 @@ impl<'parser> Parser<'parser> {
         let print_token = tokens.next().unwrap();
 
         let expr = Parser::expression(tokens)?;
-        if tokens.next_if(|t| t.lexeme == ";".into()).is_some() {
+        if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
             Ok(Ast {
                 ty: AstType::PrintStatement(Box::new(expr)),
             })
         } else if tokens.peek().is_some() {
-            ast_expected_token!(print_token, ";".into())
+            ast_expected_token!(print_token, lexeme_from(";"))
         } else {
             Err(ParseError::UnexpectedEof.into())
         }
@@ -305,8 +329,8 @@ impl<'parser> Parser<'parser> {
     fn return_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("return_stmt: {:?}", tokens.peek());
 
-        if tokens.next_if(|t| t.lexeme == ";".into()).is_some() {
-            // a 'return' without expression i.e. "return;"
+        if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
+            // a "naked" 'return' without expression i.e. "return;"
             Ok(Ast {
                 ty: AstType::ReturnStatement(None),
             })
@@ -322,17 +346,17 @@ impl<'parser> Parser<'parser> {
             )
         }) {
             let ast = Parser::expression(tokens)?;
-            if tokens.next_if(|t| t.lexeme == ";".into()).is_some() {
+            if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
                 Ok(Ast {
                     ty: AstType::ReturnStatement(Some(Box::new(ast))),
                 })
             } else if tokens.peek().is_some() {
-                ast_expected_token!(tokens.peek().unwrap(), ";".into())
+                ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
             } else {
-                Err(ast_missing_token!(";".into(), "eof".into()))
+                Err(ast_missing_token!(lexeme_from(";"), lexeme_from("eof")))
             }
         } else {
-            Err(ast_missing_token!(";".into(), "eof".into()))
+            Err(ast_missing_token!(lexeme_from(";"), lexeme_from("eof")))
         }
     }
 
@@ -345,12 +369,12 @@ impl<'parser> Parser<'parser> {
         let token = tokens.peek();
         trace!("expr_stmt: {token:?}");
         let ast = Parser::expression(tokens)?;
-        if tokens.next_if(|t| t.lexeme == ";".into()).is_some() {
+        if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
             Ok(ast)
         } else if tokens.peek().is_some() {
-            ast_expected_token!(tokens.peek().unwrap(), ";".into())
+            ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
         } else {
-            Err(ast_missing_token!(";".into(), "eof".into()))
+            Err(ast_missing_token!(lexeme_from(";"), lexeme_from("eof")))
         }
     }
 
@@ -442,14 +466,14 @@ impl<'parser> Parser<'parser> {
             )
         }) {
             Ok(ast_terminal!(token))
-        } else if let Some(_left_paren) = tokens.next_if(|t| t.lexeme == "(".into()) {
+        } else if let Some(_left_paren) = tokens.next_if(|t| t.lexeme == lexeme_from("(")) {
             let expr = Parser::expression(tokens)?;
-            if let Some(_right_paren) = tokens.next_if(|t| t.lexeme == ")".into()) {
+            if let Some(_right_paren) = tokens.next_if(|t| t.lexeme == lexeme_from(")")) {
                 Ok(ast_group!(expr))
             } else if tokens.peek().is_some() {
                 // something other than a closing ')'
                 Err(ParseError::MissingToken {
-                    expected: ")".into(),
+                    expected: lexeme_from(")"),
                     actual: tokens.next().unwrap().lexeme.clone(),
                 }
                 .into())

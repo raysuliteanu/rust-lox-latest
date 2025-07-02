@@ -5,8 +5,9 @@ use crate::span::Span;
 
 #[derive(Error, Debug)]
 pub enum TokenError {
-    #[error("[line {}] Error: Unexpected character: {}", .span.line(), .ch) ]
-    InvalidToken { ch: String, span: Span },
+    #[error("[line {}] Error: Unexpected character: {}", .span.line(),
+    .src[.span.offset()..(.span.offset() + .span.len())].to_string())]
+    InvalidToken { src: String, span: Span },
 
     #[error("[line {}] Error: Unterminated string: {}", .span.line(),
     .src[.span.offset()..(.span.offset() + .span.len())].to_string())]
@@ -367,7 +368,7 @@ impl<'scanner> Scanner<'scanner> {
                             Ok(value) => value,
                             Err(_e) => {
                                 return Err(TokenError::InvalidToken {
-                                    ch: number.clone(),
+                                    src: number.clone(),
                                     span: Span::new(line, i, num_literal.len()),
                                 }
                                 .into());
@@ -414,7 +415,7 @@ impl<'scanner> Scanner<'scanner> {
                     }
                     _ => {
                         return Err(TokenError::InvalidToken {
-                            ch: self.source.to_string(),
+                            src: self.source.to_string(),
                             span: Span::new(line, i, 1),
                         }
                         .into());

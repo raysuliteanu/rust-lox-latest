@@ -38,8 +38,7 @@ fn main() -> Result<ExitCode> {
         LoxCommands::Tokenize { filename } => {
             if let Some(file) = filename {
                 let source = get_source(file)?;
-                let scanner = Scanner::new(&source);
-                scanner
+                Scanner::new(&source)
                     .scan()
                     .map_err(|e| eprintln!("{e}"))
                     .iter()

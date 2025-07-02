@@ -23,9 +23,9 @@ struct Lox {
 
 #[derive(Subcommand)]
 enum LoxCommands {
-    Tokenize { filename: Option<String> },
-    Parse { filename: Option<String> },
-    Evaluate { filename: Option<String> },
+    Tokenize { filename: String },
+    Parse { filename: String },
+    Evaluate { filename: String },
     Run { filename: Option<String> },
 }
 
@@ -36,32 +36,20 @@ fn main() -> Result<ExitCode> {
 
     match lox.commands {
         LoxCommands::Tokenize { filename } => {
-            if let Some(file) = filename {
-                let source = get_source(file)?;
-                Scanner::new(&source)
-                    .scan()
-                    .map_err(|e| eprintln!("{e}"))
-                    .iter()
-                    .flatten()
-                    .for_each(|t| println!("{t}"));
-            } else {
-                // TODO: usage error, filename required
-            }
+            let source = get_source(filename)?;
+            Scanner::new(&source)
+                .scan()
+                .map_err(|e| eprintln!("{e}"))
+                .iter()
+                .flatten()
+                .for_each(|t| println!("{t}"));
         }
         LoxCommands::Parse { filename } => {
-            if let Some(file) = filename {
-                let _source = get_source(file)?;
-            } else {
-                // TODO: usage error, filename required
-            }
+            let _source = get_source(filename)?;
         }
 
         LoxCommands::Evaluate { filename } => {
-            if let Some(file) = filename {
-                let _source = get_source(file)?;
-            } else {
-                // TODO: usage error, filename required
-            }
+            let _source = get_source(filename)?;
         }
 
         LoxCommands::Run { filename } => {

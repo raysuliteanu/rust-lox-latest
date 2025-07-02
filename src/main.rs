@@ -39,7 +39,7 @@ fn main() -> Result<ExitCode> {
             if let Some(file) = filename {
                 let source = get_source(file)?;
                 let scanner = Scanner::new(&source);
-                let _tokens = scanner.scan()?;
+                scanner.scan()?.iter().for_each(|f| println!("{f}"));
             } else {
                 // TODO: usage error, filename required
             }

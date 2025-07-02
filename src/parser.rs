@@ -46,7 +46,7 @@ impl Display for AstType {
             AstType::ForStatement => todo!(),
             AstType::IfStatement => todo!(),
             AstType::PrintStatement(ast) => {
-                write!(f, "print {};", ast)
+                write!(f, "print {ast};")
             }
             AstType::ReturnStatement(ast) => {
                 write!(f, "return")?;
@@ -246,15 +246,12 @@ impl Parser {
         let print_token = tokens.next().unwrap();
 
         let expr = Parser::expression(tokens)?;
-        if tokens
-            .next_if(|t| t.lexeme == Lexeme::SemiColon(';'))
-            .is_some()
-        {
+        if tokens.next_if(|t| t.lexeme == ";".into()).is_some() {
             Ok(Ast {
                 ty: AstType::PrintStatement(Box::new(expr)),
             })
         } else if tokens.peek().is_some() {
-            ast_expected_token!(print_token, Lexeme::SemiColon(';'))
+            ast_expected_token!(print_token, ";".into())
         } else {
             Err(ParseError::UnexpectedEof.into())
         }
@@ -263,10 +260,7 @@ impl Parser {
     fn return_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("return_stmt: {:?}", tokens.peek());
 
-        if tokens
-            .next_if(|t| t.lexeme == Lexeme::SemiColon(';'))
-            .is_some()
-        {
+        if tokens.next_if(|t| t.lexeme == ";".into()).is_some() {
             // a 'return' without expression i.e. "return;"
             Ok(Ast {
                 ty: AstType::ReturnStatement(None),
@@ -283,20 +277,17 @@ impl Parser {
             )
         }) {
             let ast = Parser::expression(tokens)?;
-            if tokens
-                .next_if(|t| t.lexeme == Lexeme::SemiColon(';'))
-                .is_some()
-            {
+            if tokens.next_if(|t| t.lexeme == ";".into()).is_some() {
                 Ok(Ast {
                     ty: AstType::ReturnStatement(Some(Box::new(ast))),
                 })
             } else if tokens.peek().is_some() {
-                ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon(';'))
+                ast_expected_token!(tokens.peek().unwrap(), ";".into())
             } else {
-                Err(ast_missing_token!(Lexeme::SemiColon(';'), Lexeme::Eof))
+                Err(ast_missing_token!(";".into(), "eof".into()))
             }
         } else {
-            Err(ast_missing_token!(Lexeme::SemiColon(';'), Lexeme::Eof))
+            Err(ast_missing_token!(";".into(), "eof".into()))
         }
     }
 
@@ -307,17 +298,14 @@ impl Parser {
 
     fn expression_statement(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         let token = tokens.peek();
-        trace!("expr_stmt: {:?}", token);
+        trace!("expr_stmt: {token:?}");
         let ast = Parser::expression(tokens)?;
-        if tokens
-            .next_if(|t| t.lexeme == Lexeme::SemiColon(';'))
-            .is_some()
-        {
+        if tokens.next_if(|t| t.lexeme == ";".into()).is_some() {
             Ok(ast)
         } else if tokens.peek().is_some() {
-            ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon(';'))
+            ast_expected_token!(tokens.peek().unwrap(), ";".into())
         } else {
-            Err(ast_missing_token!(Lexeme::SemiColon(';'), Lexeme::Eof))
+            Err(ast_missing_token!(";".into(), "eof".into()))
         }
     }
 
@@ -409,16 +397,14 @@ impl Parser {
             )
         }) {
             Ok(ast_terminal!(token))
-        } else if let Some(_left_paren) =
-            tokens.next_if(|t| matches!(t.lexeme, Lexeme::LeftParen('(')))
-        {
+        } else if let Some(_left_paren) = tokens.next_if(|t| t.lexeme == "(".into()) {
             let expr = Parser::expression(tokens)?;
-            if let Some(_right_paren) = tokens.next_if(|t| t.lexeme == Lexeme::RightParen(')')) {
+            if let Some(_right_paren) = tokens.next_if(|t| t.lexeme == ")".into()) {
                 Ok(ast_group!(expr))
             } else if tokens.peek().is_some() {
                 // something other than a closing ')'
                 Err(ParseError::MissingToken {
-                    expected: Lexeme::RightParen(')'),
+                    expected: ")".into(),
                     actual: tokens.next().unwrap().lexeme.clone(),
                 }
                 .into())

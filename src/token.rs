@@ -1,3 +1,4 @@
+use log::trace;
 use std::fmt::Display;
 use thiserror::Error;
 
@@ -19,6 +20,12 @@ pub struct Token {
     pub(crate) span: Span,
 }
 
+impl Token {
+    pub fn new(lexeme: Lexeme, span: Span) -> Token {
+        Token { lexeme, span }
+    }
+}
+
 impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let lexeme = &self.lexeme;
@@ -27,14 +34,54 @@ impl Display for Token {
                 write!(f, "{lexeme} \"{value}\" {value}")
             }
             Lexeme::Number(value) => {
-                let val_as_str = &format!("{value}");
-                let trimmed = strip_suffix(val_as_str, ".0");
-                write!(f, "{lexeme} {trimmed} {val_as_str}")
+                let val_as_str = format!("{value}");
+                let trimmed = strip_suffix(&val_as_str, ".0");
+                write!(f, "{lexeme} {trimmed} {value}")
             }
             Lexeme::Identifier(value) => {
                 write!(f, "{lexeme} {value} null")
             }
-            _ => write!(f, "{lexeme} {lexeme} null"),
+            Lexeme::LeftParen(v)
+            | Lexeme::RightParen(v)
+            | Lexeme::LeftBrace(v)
+            | Lexeme::RightBrace(v)
+            | Lexeme::Dot(v)
+            | Lexeme::Comma(v)
+            | Lexeme::Minus(v)
+            | Lexeme::Plus(v)
+            | Lexeme::SemiColon(v)
+            | Lexeme::Star(v)
+            | Lexeme::Eq(v)
+            | Lexeme::Bang(v)
+            | Lexeme::Less(v)
+            | Lexeme::Greater(v)
+            | Lexeme::Slash(v) => write!(f, "{lexeme} {v} null"),
+            Lexeme::EqEq(v)
+            | Lexeme::BangEq(v)
+            | Lexeme::LessEq(v)
+            | Lexeme::GreaterEq(v)
+            | Lexeme::True(v)
+            | Lexeme::False(v)
+            | Lexeme::Nil(v)
+            | Lexeme::And(v)
+            | Lexeme::Or(v)
+            | Lexeme::Class(v)
+            | Lexeme::For(v)
+            | Lexeme::Fun(v)
+            | Lexeme::If(v)
+            | Lexeme::Else(v)
+            | Lexeme::Return(v)
+            | Lexeme::Super(v)
+            | Lexeme::This(v)
+            | Lexeme::Var(v)
+            | Lexeme::While(v)
+            | Lexeme::Print(v) => {
+                let v = v.to_lowercase();
+                write!(f, "{lexeme} {v} null")
+            }
+            Lexeme::Eof(_) => {
+                write!(f, "{lexeme}  null")
+            }
         }
     }
 }
@@ -86,16 +133,16 @@ pub enum Lexeme {
     String(String),
 
     // symbolic placeholder
-    Eof,
+    Eof(String),
 }
 
 impl From<&str> for Lexeme {
     fn from(value: &str) -> Self {
         match value {
-            "(" => Lexeme::RightParen('('),
-            ")" => Lexeme::LeftParen(')'),
-            "{" => Lexeme::RightBrace('{'),
-            "}" => Lexeme::LeftBrace('}'),
+            "(" => Lexeme::LeftParen('('),
+            ")" => Lexeme::RightParen(')'),
+            "{" => Lexeme::LeftBrace('{'),
+            "}" => Lexeme::RightBrace('}'),
             "," => Lexeme::Comma(','),
             "." => Lexeme::Dot('.'),
             ";" => Lexeme::SemiColon(';'),
@@ -126,6 +173,8 @@ impl From<&str> for Lexeme {
             "class" => Lexeme::Class("CLASS".to_string()),
             "super" => Lexeme::Super("SUPER".to_string()),
             "this" => Lexeme::This("THIS".to_string()),
+            "var" => Lexeme::Var("VAR".to_string()),
+            "eof" => Lexeme::Eof("EOF".to_string()),
             _ => panic!("invalid token {value}"),
         }
     }
@@ -137,22 +186,6 @@ impl Display for Lexeme {
             Lexeme::Number(_) => write!(f, "NUMBER"),
             Lexeme::Identifier(_) => write!(f, "IDENTIFIER"),
             Lexeme::String(_) => write!(f, "STRING"),
-            Lexeme::True(_) => write!(f, "TRUE"),
-            Lexeme::False(_) => write!(f, "FALSE"),
-            Lexeme::Nil(_) => write!(f, "NIL"),
-            Lexeme::And(_) => write!(f, "AND"),
-            Lexeme::Or(_) => write!(f, "OR"),
-            Lexeme::Class(_) => write!(f, "CLASS"),
-            Lexeme::For(_) => write!(f, "FOR"),
-            Lexeme::Fun(_) => write!(f, "FUN"),
-            Lexeme::If(_) => write!(f, "IF"),
-            Lexeme::Else(_) => write!(f, "ELSE"),
-            Lexeme::Return(_) => write!(f, "RETURN"),
-            Lexeme::Super(_) => write!(f, "SUPER"),
-            Lexeme::This(_) => write!(f, "THIS"),
-            Lexeme::Var(_) => write!(f, "VAR"),
-            Lexeme::While(_) => write!(f, "WHILE"),
-            Lexeme::Print(_) => write!(f, "PRINT"),
             Lexeme::LeftParen(_) => write!(f, "LEFT_PAREN"),
             Lexeme::RightParen(_) => write!(f, "RIGHT_PAREN"),
             Lexeme::LeftBrace(_) => write!(f, "LEFT_BRACE"),
@@ -172,14 +205,24 @@ impl Display for Lexeme {
             Lexeme::Greater(_) => write!(f, "GREATER"),
             Lexeme::GreaterEq(_) => write!(f, "GREATER_EQUAL"),
             Lexeme::Slash(_) => write!(f, "SLASH"),
-            Lexeme::Eof => write!(f, "EOF"),
+            Lexeme::True(v)
+            | Lexeme::False(v)
+            | Lexeme::Nil(v)
+            | Lexeme::And(v)
+            | Lexeme::Or(v)
+            | Lexeme::Class(v)
+            | Lexeme::For(v)
+            | Lexeme::Fun(v)
+            | Lexeme::If(v)
+            | Lexeme::Else(v)
+            | Lexeme::Return(v)
+            | Lexeme::Super(v)
+            | Lexeme::This(v)
+            | Lexeme::Var(v)
+            | Lexeme::While(v)
+            | Lexeme::Print(v)
+            | Lexeme::Eof(v) => write!(f, "{v}"),
         }
-    }
-}
-
-impl Token {
-    pub fn new(lexeme: Lexeme, span: Span) -> Token {
-        Token { lexeme, span }
     }
 }
 
@@ -333,6 +376,8 @@ impl<'scanner> Scanner<'scanner> {
                             }
                         };
 
+                        trace!("parsed number: {value}");
+
                         tokens.push(Token::new(
                             Lexeme::Number(value),
                             (line, i, num_literal.len()).into(),
@@ -384,6 +429,11 @@ impl<'scanner> Scanner<'scanner> {
                 }
             }
         }
+
+        tokens.push(Token::new(
+            "eof".into(),
+            Span::new(line, self.source.len(), 0),
+        ));
 
         Ok(tokens)
     }

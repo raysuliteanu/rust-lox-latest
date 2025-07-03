@@ -7,7 +7,7 @@ use crate::token::{Lexeme, Scanner, Token, lexeme_from};
 
 type PeekableTokenIter<'a> = Peekable<std::slice::Iter<'a, Token>>;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Ast {
     ty: AstType,
 }
@@ -19,11 +19,11 @@ impl Display for Ast {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum AstType {
     Class,
     Function,
-    Variable,
+    Variable(Token, Option<Box<Ast>>),
     ExprStatement,
     ForStatement,
     IfStatement,
@@ -41,7 +41,17 @@ impl Display for AstType {
         match self {
             AstType::Class => todo!(),
             AstType::Function => todo!(),
-            AstType::Variable => todo!(),
+            AstType::Variable(ident, expr) => {
+                let name = match &ident.lexeme {
+                    Lexeme::Identifier(name) => name,
+                    _ => panic!("Variable declaration must have an identifier token"),
+                };
+                write!(f, "var {name}")?;
+                if let Some(ast) = expr {
+                    write!(f, " = {ast}")?;
+                }
+                write!(f, ";")
+            }
             AstType::ExprStatement => todo!(),
             AstType::ForStatement => todo!(),
             AstType::IfStatement => todo!(),
@@ -50,8 +60,8 @@ impl Display for AstType {
             }
             AstType::ReturnStatement(ast) => {
                 write!(f, "return")?;
-                if ast.is_some() {
-                    write!(f, " {}", ast.as_ref().unwrap())?;
+                if let Some(ast) = ast {
+                    write!(f, " {ast}")?;
                 }
                 write!(f, ";")
             }
@@ -113,7 +123,7 @@ impl Display for AstType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ExpressionType {
     Unary {
         op: Box<Ast>,
@@ -232,9 +242,11 @@ impl<'parser> Parser<'parser> {
         let scanner = Scanner::new(self.source);
         let tokens = scanner.scan()?;
         if tokens.is_empty() {
+            trace!("no tokens scanned");
             return Ok(vec![]);
         }
 
+        trace!("parsing {} tokens", tokens.len());
         Parser::program(&mut tokens.iter().peekable())
     }
 
@@ -247,6 +259,8 @@ impl<'parser> Parser<'parser> {
             let statement = Parser::declaration(tokens)?;
             ast.push(statement);
         }
+
+        trace!("parsed AST: {ast:?}");
 
         Ok(ast)
     }
@@ -272,8 +286,40 @@ impl<'parser> Parser<'parser> {
         todo!("fun decl")
     }
 
-    fn var_decl(_tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
-        todo!("var decl")
+    // varDecl → "var" IDENTIFIER ( "=" expression )? ";" ;
+    fn var_decl(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+        trace!("var_decl: {:?}", tokens.peek());
+
+        // eat 'var' token
+        let var_token = tokens.next().unwrap();
+        assert_eq!(var_token.lexeme, lexeme_from("var"));
+
+        match tokens.peek() {
+            Some(t) => match &t.lexeme {
+                Lexeme::Identifier(_) => {
+                    trace!("found identifier: {t}");
+                    let identifier_token = tokens.next().unwrap().clone();
+                    let expr = if let Some(_e) = tokens.next_if(|t| t.lexeme == lexeme_from("=")) {
+                        let expr = Parser::expression(tokens)?;
+                        Some(Box::new(expr))
+                    } else {
+                        None
+                    };
+
+                    if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
+                        Ok(Ast {
+                            ty: AstType::Variable(identifier_token, expr),
+                        })
+                    } else if tokens.peek().is_some() {
+                        ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
+                    } else {
+                        Err(ParseError::UnexpectedEof.into())
+                    }
+                }
+                _ => ast_expected_token!(t, lexeme_from("identifier")),
+            },
+            _ => todo!("unexpected eof"),
+        }
     }
 
     fn statement(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
@@ -313,6 +359,7 @@ impl<'parser> Parser<'parser> {
         trace!("print_stmt: {:?}", tokens.peek());
 
         let print_token = tokens.next().unwrap();
+        assert_eq!(print_token.lexeme, lexeme_from("print"));
 
         let expr = Parser::expression(tokens)?;
         if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
@@ -320,7 +367,7 @@ impl<'parser> Parser<'parser> {
                 ty: AstType::PrintStatement(Box::new(expr)),
             })
         } else if tokens.peek().is_some() {
-            ast_expected_token!(print_token, lexeme_from(";"))
+            ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
         } else {
             Err(ParseError::UnexpectedEof.into())
         }
@@ -328,6 +375,9 @@ impl<'parser> Parser<'parser> {
 
     fn return_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("return_stmt: {:?}", tokens.peek());
+
+        // Consume the 'return' token first
+        let return_token = tokens.next().unwrap();
 
         if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
             // a "naked" 'return' without expression i.e. "return;"
@@ -356,7 +406,7 @@ impl<'parser> Parser<'parser> {
                 Err(ast_missing_token!(lexeme_from(";"), lexeme_from("eof")))
             }
         } else {
-            Err(ast_missing_token!(lexeme_from(";"), lexeme_from("eof")))
+            ast_expected_token!(return_token, lexeme_from(";"))
         }
     }
 
@@ -493,5 +543,336 @@ impl<'parser> Parser<'parser> {
             }
             .into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::span::Span;
+
+    fn create_token(lexeme: Lexeme) -> Token {
+        Token::new(lexeme, Span::new(1, 0, 1))
+    }
+
+    #[test]
+    fn test_ast_display_print_statement() {
+        let expr = Ast {
+            ty: AstType::Terminal(create_token(lexeme_from("true"))),
+        };
+        let print_stmt = Ast {
+            ty: AstType::PrintStatement(Box::new(expr)),
+        };
+        assert_eq!(print_stmt.to_string(), "print TRUE;");
+    }
+
+    #[test]
+    fn test_ast_display_return_statement_with_value() {
+        let expr = Ast {
+            ty: AstType::Terminal(create_token(Lexeme::Number("42".to_string(), 42.0))),
+        };
+        let return_stmt = Ast {
+            ty: AstType::ReturnStatement(Some(Box::new(expr))),
+        };
+        assert_eq!(return_stmt.to_string(), "return 42;");
+    }
+
+    #[test]
+    fn test_ast_display_return_statement_without_value() {
+        let return_stmt = Ast {
+            ty: AstType::ReturnStatement(None),
+        };
+        assert_eq!(return_stmt.to_string(), "return;");
+    }
+
+    #[test]
+    fn test_ast_display_group() {
+        let expr = Ast {
+            ty: AstType::Terminal(create_token(lexeme_from("true"))),
+        };
+        let group = Ast {
+            ty: AstType::Group(Box::new(expr)),
+        };
+        assert_eq!(group.to_string(), "(group TRUE)");
+    }
+
+    #[test]
+    fn test_ast_display_binary_expression() {
+        let left = Ast {
+            ty: AstType::Terminal(create_token(Lexeme::Number("1".to_string(), 1.0))),
+        };
+        let right = Ast {
+            ty: AstType::Terminal(create_token(Lexeme::Number("2".to_string(), 2.0))),
+        };
+        let op = Ast {
+            ty: AstType::Terminal(create_token(lexeme_from("+"))),
+        };
+        let binary = Ast {
+            ty: AstType::Expression(ExpressionType::Binary {
+                op: Box::new(op),
+                left: Box::new(left),
+                right: Box::new(right),
+            }),
+        };
+        assert_eq!(binary.to_string(), "(+ 1 2)");
+    }
+
+    #[test]
+    fn test_ast_display_unary_expression() {
+        let expr = Ast {
+            ty: AstType::Terminal(create_token(Lexeme::Number("5".to_string(), 5.0))),
+        };
+        let op = create_token(lexeme_from("-"));
+        let unary = Ast {
+            ty: AstType::Expression(ExpressionType::Unary {
+                op: Box::new(Ast {
+                    ty: AstType::Terminal(op),
+                }),
+                exp: Box::new(expr),
+            }),
+        };
+        assert_eq!(unary.to_string(), "(- 5)");
+    }
+
+    #[test]
+    fn test_ast_display_terminal_literals() {
+        let true_ast = Ast {
+            ty: AstType::Terminal(create_token(lexeme_from("true"))),
+        };
+        assert_eq!(true_ast.to_string(), "TRUE");
+
+        let false_ast = Ast {
+            ty: AstType::Terminal(create_token(lexeme_from("false"))),
+        };
+        assert_eq!(false_ast.to_string(), "FALSE");
+
+        let nil_ast = Ast {
+            ty: AstType::Terminal(create_token(lexeme_from("nil"))),
+        };
+        assert_eq!(nil_ast.to_string(), "NIL");
+
+        let number_ast = Ast {
+            ty: AstType::Terminal(create_token(Lexeme::Number("1.23".to_string(), 1.23))),
+        };
+        assert_eq!(number_ast.to_string(), "3.14");
+
+        let string_ast = Ast {
+            ty: AstType::Terminal(create_token(Lexeme::String("hello".to_string()))),
+        };
+        assert_eq!(string_ast.to_string(), "hello");
+
+        let identifier_ast = Ast {
+            ty: AstType::Terminal(create_token(Lexeme::Identifier("var_name".to_string()))),
+        };
+        assert_eq!(identifier_ast.to_string(), "var_name");
+    }
+
+    #[test]
+    fn test_parser_new() {
+        let source = "print 42;";
+        let parser = Parser::new(source);
+        assert_eq!(parser.source, source);
+    }
+
+    #[test]
+    fn test_parse_empty_source() {
+        let mut parser = Parser::new("");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), vec![]);
+    }
+
+    #[test]
+    fn test_parse_simple_print_statement() {
+        let mut parser = Parser::new("print 42;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "print 42;");
+    }
+
+    #[test]
+    fn test_parse_return_statement_with_value() {
+        let mut parser = Parser::new("return 123;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "return 123;");
+    }
+
+    #[test]
+    fn test_parse_return_statement_without_value() {
+        let mut parser = Parser::new("return;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "return;");
+    }
+
+    #[test]
+    fn test_parse_expression_statement() {
+        let mut parser = Parser::new("42;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "42");
+    }
+
+    #[test]
+    fn test_parse_binary_expression() {
+        let mut parser = Parser::new("1 + 2;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "(+ 1 2)");
+    }
+
+    #[test]
+    fn test_parse_unary_expression() {
+        let mut parser = Parser::new("-5;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "(- 5)");
+    }
+
+    #[test]
+    fn test_parse_grouped_expression() {
+        let mut parser = Parser::new("(42);");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "(group 42)");
+    }
+
+    #[test]
+    fn test_parse_equality_expression() {
+        let mut parser = Parser::new("1 == 2;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "(== 1 2)");
+
+        let mut parser = Parser::new("true != false;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "(!= TRUE FALSE)");
+    }
+
+    #[test]
+    fn test_parse_comparison_expression() {
+        let mut parser = Parser::new("5 > 3;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "(> 5 3)");
+
+        let mut parser = Parser::new("2 <= 4;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "(<= 2 4)");
+    }
+
+    #[test]
+    fn test_parse_factor_expression() {
+        let mut parser = Parser::new("6 * 7;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "(* 6 7)");
+
+        let mut parser = Parser::new("8 / 2;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "(/ 8 2)");
+    }
+
+    #[test]
+    fn test_parse_complex_expression() {
+        let mut parser = Parser::new("1 + 2 * 3;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ast[0].to_string(), "(+ 1 (* 2 3))");
+    }
+
+    #[test]
+    fn test_parse_multiple_statements() {
+        let mut parser = Parser::new("print 1; return 2;");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let ast = result.unwrap();
+        assert_eq!(ast.len(), 2);
+        assert_eq!(ast[0].to_string(), "print 1;");
+        assert_eq!(ast[1].to_string(), "return 2;");
+    }
+
+    #[test]
+    fn test_parse_error_missing_semicolon() {
+        let mut parser = Parser::new("print 42");
+        let result = parser.parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_error_missing_closing_paren() {
+        let mut parser = Parser::new("(42;");
+        let result = parser.parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_error_unexpected_eof() {
+        let mut parser = Parser::new("print");
+        let result = parser.parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_expression_type_display() {
+        let left = Ast {
+            ty: AstType::Terminal(create_token(Lexeme::Number("1".to_string(), 1.0))),
+        };
+        let right = Ast {
+            ty: AstType::Terminal(create_token(Lexeme::Number("2".to_string(), 2.0))),
+        };
+        let op = Ast {
+            ty: AstType::Terminal(create_token(lexeme_from("+"))),
+        };
+        let binary = ExpressionType::Binary {
+            op: Box::new(op),
+            left: Box::new(left),
+            right: Box::new(right),
+        };
+        assert_eq!(binary.to_string(), "1 + 2");
+
+        let expr = Ast {
+            ty: AstType::Terminal(create_token(Lexeme::Number("5".to_string(), 5.0))),
+        };
+        let op = Ast {
+            ty: AstType::Terminal(create_token(lexeme_from("-"))),
+        };
+        let unary = ExpressionType::Unary {
+            op: Box::new(op),
+            exp: Box::new(expr),
+        };
+        assert_eq!(unary.to_string(), "-5");
     }
 }

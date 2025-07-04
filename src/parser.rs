@@ -23,13 +23,16 @@ impl Display for Ast {
 pub enum AstType {
     Class,
     Function,
+    // name, initializer
     Variable(Token, Option<Box<Ast>>),
     ExprStatement,
     ForStatement,
-    IfStatement,
+    // condition, then, else
+    IfStatement(Box<Ast>, Box<Ast>, Option<Box<Ast>>),
     PrintStatement(Box<Ast>),
     ReturnStatement(Option<Box<Ast>>),
-    WhileStatement,
+    // cond, body
+    WhileStatement(Box<Ast>, Box<Ast>),
     Block,
     Group(Box<Ast>),
     Expression(ExpressionType),
@@ -54,7 +57,13 @@ impl Display for AstType {
             }
             AstType::ExprStatement => todo!(),
             AstType::ForStatement => todo!(),
-            AstType::IfStatement => todo!(),
+            AstType::IfStatement(cond, then_stmt, else_stmt) => {
+                writeln!(f, "if {cond} {{ {then_stmt} }}")?;
+                if let Some(else_stmt) = else_stmt {
+                    write!(f, "else {{ {else_stmt} }}")?;
+                }
+                Ok(())
+            }
             AstType::PrintStatement(ast) => {
                 write!(f, "print {ast};")
             }
@@ -65,7 +74,10 @@ impl Display for AstType {
                 }
                 write!(f, ";")
             }
-            AstType::WhileStatement => todo!(),
+            AstType::WhileStatement(cond, body) => {
+                writeln!(f, "while {cond} {{")?;
+                writeln!(f, "{body} }}")
+            }
             AstType::Block => todo!(),
             AstType::Group(ast) => {
                 write!(f, "(group {ast})")
@@ -352,7 +364,36 @@ impl<'parser> Parser<'parser> {
 
     fn if_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("if_stmt: {:?}", tokens.peek());
-        todo!("parse if stmt")
+        let if_token = tokens.next().unwrap();
+        assert_eq!(if_token.lexeme, lexeme_from("if"));
+
+        let cond = Parser::expression(tokens)?;
+        let then_stmt = Parser::statement(tokens)?;
+        let else_stmt = if tokens
+            .next_if(|t| t.lexeme == lexeme_from("else"))
+            .is_some()
+        {
+            Some(Box::new(Parser::statement(tokens)?))
+        } else {
+            None
+        };
+
+        Ok(Ast {
+            ty: AstType::IfStatement(Box::new(cond), Box::new(then_stmt), else_stmt),
+        })
+    }
+
+    fn while_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+        trace!("while_stmt: {:?}", tokens.peek());
+        let while_token = tokens.next().unwrap();
+        assert_eq!(while_token.lexeme, lexeme_from("while"));
+
+        let cond = Parser::expression(tokens)?;
+        let body = Parser::statement(tokens)?;
+
+        Ok(Ast {
+            ty: AstType::WhileStatement(Box::new(cond), Box::new(body)),
+        })
     }
 
     fn print_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
@@ -408,11 +449,6 @@ impl<'parser> Parser<'parser> {
         } else {
             ast_expected_token!(return_token, lexeme_from(";"))
         }
-    }
-
-    fn while_stmt(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
-        trace!("while_stmt: {:?}", tokens.peek());
-        todo!("parse while stmt")
     }
 
     fn expression_statement(tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {

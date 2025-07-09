@@ -11,6 +11,7 @@ use std::{
 
 use crate::token::Scanner;
 
+mod eval;
 mod parser;
 mod span;
 mod token;

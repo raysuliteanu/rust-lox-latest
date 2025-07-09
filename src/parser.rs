@@ -10,7 +10,7 @@ pub type ParseResult<T> = Result<T, u8>;
 
 #[derive(Debug, PartialEq)]
 pub struct Ast {
-    ty: AstType,
+    pub(crate) ty: AstType,
 }
 
 impl Display for Ast {
@@ -26,7 +26,7 @@ pub enum AstType {
     Function,
     // name, initializer
     Variable(Token, Option<Box<Ast>>),
-    ExprStatement,
+    ExprStatement(Box<Ast>),
     ForStatement,
     // condition, then, else
     IfStatement(Box<Ast>, Box<Ast>, Option<Box<Ast>>),
@@ -56,7 +56,7 @@ impl Display for AstType {
                 }
                 write!(f, ";")
             }
-            AstType::ExprStatement => todo!(),
+            AstType::ExprStatement(expr) => write!(f, "{expr}"),
             AstType::ForStatement => todo!(),
             AstType::IfStatement(cond, then_stmt, else_stmt) => {
                 writeln!(f, "if {cond} {{ {then_stmt} }}")?;
@@ -262,7 +262,7 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    pub fn parse(&mut self) -> ParseResult<Vec<Ast>> {
+    pub fn parse(&self) -> ParseResult<Vec<Ast>> {
         let scanner = Scanner::new(self.source, false);
         if let Ok(tokens) = scanner.scan() {
             if tokens.is_empty() {
@@ -285,7 +285,7 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn program(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Vec<Ast>> {
+    fn program(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Vec<Ast>> {
         let mut ast: Vec<Ast> = Vec::new();
 
         while let Some(token) = tokens.peek()
@@ -300,7 +300,7 @@ impl<'parser> Parser<'parser> {
         Ok(ast)
     }
 
-    fn declaration(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn declaration(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         if let Some(token) = tokens.peek() {
             match token.lexeme {
                 Lexeme::Class(_) => self.class_decl(tokens),
@@ -313,16 +313,16 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn class_decl(&mut self, _tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn class_decl(&self, _tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         todo!("class decl")
     }
 
-    fn fun_decl(&mut self, _tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn fun_decl(&self, _tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         todo!("fun decl")
     }
 
     // varDecl → "var" IDENTIFIER ( "=" expression )? ";" ;
-    fn var_decl(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn var_decl(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("var_decl: {:?}", tokens.peek());
 
         // eat 'var' token
@@ -357,7 +357,7 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn statement(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn statement(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("statement: {:?}", tokens.peek());
         let r = match tokens.peek() {
             Some(token) => match token.lexeme {
@@ -376,17 +376,17 @@ impl<'parser> Parser<'parser> {
         Ok(r)
     }
 
-    fn parse_block(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn parse_block(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("block_stmt: {:?}", tokens.peek());
         todo!("parse block")
     }
 
-    fn for_stmt(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn for_stmt(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("for_stmt: {:?}", tokens.peek());
         todo!("parse for stmt")
     }
 
-    fn if_stmt(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn if_stmt(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("if_stmt: {:?}", tokens.peek());
         let if_token = tokens.next().unwrap();
         assert_eq!(if_token.lexeme, lexeme_from("if"));
@@ -407,7 +407,7 @@ impl<'parser> Parser<'parser> {
         })
     }
 
-    fn while_stmt(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn while_stmt(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("while_stmt: {:?}", tokens.peek());
         let while_token = tokens.next().unwrap();
         assert_eq!(while_token.lexeme, lexeme_from("while"));
@@ -420,7 +420,7 @@ impl<'parser> Parser<'parser> {
         })
     }
 
-    fn print_stmt(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn print_stmt(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("print_stmt: {:?}", tokens.peek());
 
         let print_token = tokens.next().unwrap();
@@ -438,7 +438,7 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn return_stmt(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn return_stmt(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("return_stmt: {:?}", tokens.peek());
 
         // Consume the 'return' token first
@@ -475,12 +475,14 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn expression_statement(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn expression_statement(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         let token = tokens.peek();
         trace!("expr_stmt: {token:?}");
         let ast = self.expression(tokens)?;
         if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
-            Ok(ast)
+            Ok(Ast {
+                ty: AstType::ExprStatement(Box::new(ast)),
+            })
         } else if tokens.peek().is_some() {
             ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
         } else {
@@ -488,12 +490,12 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn expression(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn expression(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("expr: {:?}", tokens.peek());
         self.equality(tokens)
     }
 
-    fn equality(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn equality(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("equality: {:?}", tokens.peek());
         let mut left = self.comparison(tokens)?;
 
@@ -508,7 +510,7 @@ impl<'parser> Parser<'parser> {
         Ok(left)
     }
 
-    fn comparison(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn comparison(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("comparison: {:?}", tokens.peek());
         let mut left = self.term(tokens)?;
 
@@ -526,7 +528,7 @@ impl<'parser> Parser<'parser> {
         Ok(left)
     }
 
-    fn term(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn term(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("term: {:?}", tokens.peek());
         let mut left = self.factor(tokens)?;
 
@@ -541,7 +543,7 @@ impl<'parser> Parser<'parser> {
         Ok(left)
     }
 
-    fn factor(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn factor(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("factor: {:?}", tokens.peek());
         let mut left = self.unary(tokens)?;
 
@@ -556,7 +558,7 @@ impl<'parser> Parser<'parser> {
         Ok(left)
     }
 
-    fn unary(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn unary(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("unary: {:?}", tokens.peek());
         if let Some(t) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::Minus(_) | Lexeme::Bang(_)))
         {
@@ -567,7 +569,7 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn primary(&mut self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn primary(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
         trace!("primary: {:?}", tokens.peek());
         if let Some(token) = tokens.next_if(|t| {
             matches!(
@@ -736,7 +738,7 @@ mod tests {
 
     #[test]
     fn test_parse_empty_source() {
-        let mut parser = Parser::new("", true);
+        let parser = Parser::new("", true);
         let result = parser.parse();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), vec![]);
@@ -744,7 +746,7 @@ mod tests {
 
     #[test]
     fn test_parse_simple_print_statement() {
-        let mut parser = Parser::new("print 42;", true);
+        let parser = Parser::new("print 42;", true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -754,7 +756,7 @@ mod tests {
 
     #[test]
     fn test_parse_return_statement_with_value() {
-        let mut parser = Parser::new("return 123;", true);
+        let parser = Parser::new("return 123;", true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -764,7 +766,7 @@ mod tests {
 
     #[test]
     fn test_parse_return_statement_without_value() {
-        let mut parser = Parser::new("return;", true);
+        let parser = Parser::new("return;", true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -774,7 +776,7 @@ mod tests {
 
     #[test]
     fn test_parse_expression_statement() {
-        let mut parser = Parser::new("42;", false);
+        let parser = Parser::new("42;", false);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -784,7 +786,7 @@ mod tests {
 
     #[test]
     fn test_parse_binary_expression() {
-        let mut parser = Parser::new("1 + 2;", false);
+        let parser = Parser::new("1 + 2;", false);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -794,7 +796,7 @@ mod tests {
 
     #[test]
     fn test_parse_unary_expression() {
-        let mut parser = Parser::new("-5;", false);
+        let parser = Parser::new("-5;", false);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -804,7 +806,7 @@ mod tests {
 
     #[test]
     fn test_parse_grouped_expression() {
-        let mut parser = Parser::new("(42);", false);
+        let parser = Parser::new("(42);", false);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -814,14 +816,14 @@ mod tests {
 
     #[test]
     fn test_parse_equality_expression() {
-        let mut parser = Parser::new("1 == 2;", false);
+        let parser = Parser::new("1 == 2;", false);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
         assert_eq!(ast.len(), 1);
         assert_eq!(ast[0].to_string(), "(== 1 2)");
 
-        let mut parser = Parser::new("true != false;", false);
+        let parser = Parser::new("true != false;", false);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -831,14 +833,14 @@ mod tests {
 
     #[test]
     fn test_parse_comparison_expression() {
-        let mut parser = Parser::new("5 > 3;", false);
+        let parser = Parser::new("5 > 3;", false);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
         assert_eq!(ast.len(), 1);
         assert_eq!(ast[0].to_string(), "(> 5 3)");
 
-        let mut parser = Parser::new("2 <= 4;", false);
+        let parser = Parser::new("2 <= 4;", false);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -848,14 +850,14 @@ mod tests {
 
     #[test]
     fn test_parse_factor_expression() {
-        let mut parser = Parser::new("6 * 7;", false);
+        let parser = Parser::new("6 * 7;", false);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
         assert_eq!(ast.len(), 1);
         assert_eq!(ast[0].to_string(), "(* 6 7)");
 
-        let mut parser = Parser::new("8 / 2;", false);
+        let parser = Parser::new("8 / 2;", false);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -865,7 +867,7 @@ mod tests {
 
     #[test]
     fn test_parse_complex_expression() {
-        let mut parser = Parser::new("1 + 2 * 3;", false);
+        let parser = Parser::new("1 + 2 * 3;", false);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -875,7 +877,7 @@ mod tests {
 
     #[test]
     fn test_parse_multiple_statements() {
-        let mut parser = Parser::new("print 1; return 2;", false);
+        let parser = Parser::new("print 1; return 2;", false);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -886,21 +888,21 @@ mod tests {
 
     #[test]
     fn test_parse_error_missing_semicolon() {
-        let mut parser = Parser::new("print 42", true);
+        let parser = Parser::new("print 42", true);
         let result = parser.parse();
         assert!(result.is_err());
     }
 
     #[test]
     fn test_parse_error_missing_closing_paren() {
-        let mut parser = Parser::new("(42;", true);
+        let parser = Parser::new("(42;", true);
         let result = parser.parse();
         assert!(result.is_err());
     }
 
     #[test]
     fn test_parse_error_unexpected_eof() {
-        let mut parser = Parser::new("print", true);
+        let parser = Parser::new("print", true);
         let result = parser.parse();
         assert!(result.is_err());
     }

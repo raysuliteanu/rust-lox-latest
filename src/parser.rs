@@ -113,7 +113,7 @@ impl Display for AstType {
                 | Lexeme::LessEq(v)
                 | Lexeme::GreaterEq(v)
                 | Lexeme::Identifier(v)
-                | Lexeme::String(v) => write!(f, "{v}"),
+                | Lexeme::String(v) => write!(f, "{}", v.to_lowercase()),
                 Lexeme::LeftParen(v)
                 | Lexeme::RightParen(v)
                 | Lexeme::LeftBrace(v)
@@ -129,7 +129,14 @@ impl Display for AstType {
                 | Lexeme::Less(v)
                 | Lexeme::Greater(v)
                 | Lexeme::Slash(v) => write!(f, "{v}"),
-                Lexeme::Number(_, v) => write!(f, "{v}"),
+                Lexeme::Number(_, v) => {
+                    if *v == v.trunc() {
+                        write!(f, "{v}.0")
+                    } else {
+                        write!(f, "{v}")
+                    }
+                }
+
                 Lexeme::Eof(_) => unreachable!(),
             },
         }
@@ -256,7 +263,7 @@ impl<'parser> Parser<'parser> {
     }
 
     pub fn parse(&mut self) -> ParseResult<Vec<Ast>> {
-        let scanner = Scanner::new(self.source);
+        let scanner = Scanner::new(self.source, false);
         if let Ok(tokens) = scanner.scan() {
             if tokens.is_empty() {
                 trace!("no tokens scanned");

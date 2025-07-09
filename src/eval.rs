@@ -1,4 +1,5 @@
-use crate::parser::{Ast, AstType, ExpressionType, Parser};
+use crate::model::{Ast, AstExpr, AstStmt};
+use crate::parser::Parser;
 
 pub enum EvalValue<'e> {
     Number(f64),
@@ -26,23 +27,27 @@ impl<'eval> Eval<'_> {
 
     fn eval(&self, mut tree: std::slice::Iter<'_, Ast>) -> EvalResult {
         while let Some(ast) = tree.next() {
-            match &ast.ty {
-                AstType::Class => todo!(),
-                AstType::Function => todo!(),
-                AstType::Variable(token, ast) => todo!(),
-                AstType::ExprStatement(expr) => todo!(),
-                AstType::ForStatement => todo!(),
-                AstType::IfStatement(ast, ast1, ast2) => todo!(),
-                AstType::PrintStatement(ast) => todo!(),
-                AstType::ReturnStatement(ast) => todo!(),
-                AstType::WhileStatement(ast, ast1) => todo!(),
-                AstType::Block => todo!(),
-                AstType::Group(ast) => todo!(),
-                AstType::Terminal(token) => todo!(),
-                AstType::Expression(expression_type) => match expression_type {
-                    ExpressionType::Unary { op, exp } => todo!(),
-                    ExpressionType::Binary { op, left, right } => todo!(),
+            match ast {
+                Ast::Class => todo!(),
+                Ast::Function => todo!(),
+                Ast::Variable(_token, _ast) => todo!(),
+                Ast::Statement(stmt) => match stmt {
+                    AstStmt::ExpressionStatement(expr) => match expr.as_ref() {
+                        Ast::Expression(AstExpr::Terminal(_token)) => todo!(),
+                        Ast::Expression(AstExpr::Group(_ast)) => todo!(),
+                        Ast::Expression(AstExpr::Logical { op: _, left: _, right: _ }) => todo!(),
+                        Ast::Expression(AstExpr::Unary { op: _, exp: _ }) => todo!(),
+                        Ast::Expression(AstExpr::Binary { op: _, left: _, right: _ }) => todo!(),
+                        _ => todo!(),
+                    },
+                    AstStmt::ForStatement => todo!(),
+                    AstStmt::IfStatement(_ast, _ast1, _ast2) => todo!(),
+                    AstStmt::PrintStatement(_ast) => todo!(),
+                    AstStmt::ReturnStatement(_ast) => todo!(),
+                    AstStmt::WhileStatement(_ast, _ast1) => todo!(),
                 },
+                Ast::Block(_) => todo!(),
+                Ast::Expression(_) => todo!(),
             }
         }
 

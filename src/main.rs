@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use log::trace;
-use parser::Ast;
+use model::Ast;
 use std::{
     fs,
     io::{BufRead as _, Read, Write as _, stdin, stdout},
@@ -12,6 +12,7 @@ use std::{
 use crate::token::Scanner;
 
 mod eval;
+mod model;
 mod parser;
 mod span;
 mod token;

@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use log::trace;
 use thiserror::Error;
 
-use crate::model::{Ast, AstExpr, AstStmt};
+use crate::model::{Ast, AstStmt};
 use crate::token::{Lexeme, Scanner, Token, lexeme_from};
 
 type PeekableTokenIter<'a> = Peekable<std::slice::Iter<'a, Token>>;
@@ -232,7 +232,7 @@ impl<'parser> Parser<'parser> {
             None
         };
 
-        Ok(Ast::Statement(AstStmt::IfStatement(
+        Ok(Ast::Statement(AstStmt::If(
             Box::new(cond),
             Box::new(then_stmt),
             else_stmt,
@@ -247,7 +247,7 @@ impl<'parser> Parser<'parser> {
         let cond = self.expression(tokens)?;
         let body = self.statement(tokens)?;
 
-        Ok(Ast::Statement(AstStmt::WhileStatement(
+        Ok(Ast::Statement(AstStmt::While(
             Box::new(cond),
             Box::new(body),
         )))
@@ -261,7 +261,10 @@ impl<'parser> Parser<'parser> {
 
         let expr = self.expression(tokens)?;
         if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
-            Ok(Ast::Statement(AstStmt::PrintStatement(Box::new(expr))))
+            match expr {
+                Ast::Expression(expr) => Ok(Ast::Statement(AstStmt::Print(expr))),
+                _ => panic!("invalid expression: {expr}"),
+            }
         } else if tokens.peek().is_some() {
             ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
         } else {
@@ -277,7 +280,7 @@ impl<'parser> Parser<'parser> {
 
         if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
             // a "naked" 'return' without expression i.e. "return;"
-            Ok(Ast::Statement(AstStmt::ReturnStatement(None)))
+            Ok(Ast::Statement(AstStmt::Return(None)))
         } else if tokens.peek().is_some_and(|t| {
             !matches!(
                 t.lexeme,
@@ -291,9 +294,7 @@ impl<'parser> Parser<'parser> {
         }) {
             let ast = self.expression(tokens)?;
             if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
-                Ok(Ast::Statement(AstStmt::ReturnStatement(Some(Box::new(
-                    ast,
-                )))))
+                Ok(Ast::Statement(AstStmt::Return(Some(Box::new(ast)))))
             } else if tokens.peek().is_some() {
                 ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
             } else {
@@ -309,7 +310,10 @@ impl<'parser> Parser<'parser> {
         trace!("expr_stmt: {token:?}");
         let ast = self.expression(tokens)?;
         if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
-            Ok(Ast::Statement(AstStmt::ExpressionStatement(Box::new(ast))))
+            match ast {
+                Ast::Expression(expr) => Ok(Ast::Statement(AstStmt::Expression(expr))),
+                _ => panic!("invalid expression: {ast}"),
+            }
         } else if tokens.peek().is_some() {
             ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
         } else {
@@ -438,7 +442,7 @@ impl<'parser> Parser<'parser> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::span::Span;
+    use crate::{model::AstExpr, span::Span};
 
     fn create_token(lexeme: Lexeme) -> Token {
         Token::new(lexeme, Span::new(1, 0, 1))
@@ -446,8 +450,8 @@ mod tests {
 
     #[test]
     fn test_ast_display_print_statement() {
-        let expr = Ast::Expression(AstExpr::Terminal(create_token(lexeme_from("true"))));
-        let print_stmt = Ast::Statement(AstStmt::PrintStatement(Box::new(expr)));
+        let expr = AstExpr::Terminal(create_token(lexeme_from("true")));
+        let print_stmt = Ast::Statement(AstStmt::Print(expr));
         assert_eq!(print_stmt.to_string(), "print true;");
     }
 
@@ -457,13 +461,13 @@ mod tests {
             "42".to_string(),
             42.0,
         ))));
-        let return_stmt = Ast::Statement(AstStmt::ReturnStatement(Some(Box::new(expr))));
+        let return_stmt = Ast::Statement(AstStmt::Return(Some(Box::new(expr))));
         assert_eq!(return_stmt.to_string(), "return 42.0;");
     }
 
     #[test]
     fn test_ast_display_return_statement_without_value() {
-        let return_stmt = Ast::Statement(AstStmt::ReturnStatement(None));
+        let return_stmt = Ast::Statement(AstStmt::Return(None));
         assert_eq!(return_stmt.to_string(), "return;");
     }
 
@@ -518,13 +522,20 @@ mod tests {
         let nil_ast = Ast::Expression(AstExpr::Terminal(create_token(lexeme_from("nil"))));
         assert_eq!(nil_ast.to_string(), "nil");
 
-        let number_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Number("1.23".to_string(), 1.23))));
+        let number_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Number(
+            "1.23".to_string(),
+            1.23,
+        ))));
         assert_eq!(number_ast.to_string(), "1.23");
 
-        let string_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::String("hello".to_string()))));
+        let string_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::String(
+            "hello".to_string(),
+        ))));
         assert_eq!(string_ast.to_string(), "hello");
 
-        let identifier_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Identifier("var_name".to_string()))));
+        let identifier_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Identifier(
+            "var_name".to_string(),
+        ))));
         assert_eq!(identifier_ast.to_string(), "var_name");
     }
 
@@ -708,8 +719,14 @@ mod tests {
 
     #[test]
     fn test_expression_type_display() {
-        let left = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Number("1".to_string(), 1.0))));
-        let right = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Number("2".to_string(), 2.0))));
+        let left = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Number(
+            "1".to_string(),
+            1.0,
+        ))));
+        let right = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Number(
+            "2".to_string(),
+            2.0,
+        ))));
         let op = Ast::Expression(AstExpr::Terminal(create_token(lexeme_from("+"))));
         let binary = AstExpr::Binary {
             op: Box::new(op),
@@ -718,7 +735,10 @@ mod tests {
         };
         assert_eq!(binary.to_string(), "(+ 1.0 2.0)");
 
-        let expr = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Number("5".to_string(), 5.0))));
+        let expr = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Number(
+            "5".to_string(),
+            5.0,
+        ))));
         let op = Ast::Expression(AstExpr::Terminal(create_token(lexeme_from("-"))));
         let unary = AstExpr::Unary {
             op: Box::new(op),

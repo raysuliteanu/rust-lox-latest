@@ -17,13 +17,13 @@ pub enum Ast {
 #[derive(Debug, PartialEq)]
 pub enum AstStmt {
     // condition, then, else
-    IfStatement(Box<Ast>, Box<Ast>, Option<Box<Ast>>),
-    WhileStatement(Box<Ast>, Box<Ast>),
-    ForStatement,
-    ReturnStatement(Option<Box<Ast>>),
-    PrintStatement(Box<Ast>),
+    If(Box<Ast>, Box<Ast>, Option<Box<Ast>>),
     // cond, body
-    ExpressionStatement(Box<Ast>),
+    While(Box<Ast>, Box<Ast>),
+    For,
+    Return(Option<Box<Ast>>),
+    Print(AstExpr),
+    Expression(AstExpr),
 }
 
 #[derive(Debug, PartialEq)]
@@ -78,10 +78,8 @@ impl Display for AstExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AstExpr::Assignment { id, expr } => todo!(),
-            AstExpr::Logical { op, left, right } => todo!(),
-            AstExpr::Unary { op, exp } => {
-                write!(f, "({op} {exp})")
-            }
+            AstExpr::Logical { op, left, right } => todo!("logical"),
+            AstExpr::Unary { op, exp } => write!(f, "({op} {exp})"),
             AstExpr::Binary { op, left, right } => {
                 write!(f, "({op} {left} {right})")
             }
@@ -141,27 +139,27 @@ impl Display for AstExpr {
 impl Display for AstStmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AstStmt::IfStatement(cond, then_stmt, else_stmt) => {
+            AstStmt::If(cond, then_stmt, else_stmt) => {
                 writeln!(f, "if {cond} {{ {then_stmt} }}")?;
                 if let Some(else_stmt) = else_stmt {
                     write!(f, "else {{ {else_stmt} }}")?;
                 }
                 Ok(())
             }
-            AstStmt::WhileStatement(cond, body) => {
+            AstStmt::While(cond, body) => {
                 writeln!(f, "while {cond} {{")?;
                 writeln!(f, "{body} }}")
             }
-            AstStmt::ForStatement => todo!(),
-            AstStmt::ReturnStatement(ast) => {
+            AstStmt::For => todo!(),
+            AstStmt::Return(ast) => {
                 write!(f, "return")?;
                 if let Some(ast) = ast {
                     write!(f, " {ast}")?;
                 }
                 write!(f, ";")
             }
-            AstStmt::PrintStatement(ast) => write!(f, "print {ast};"),
-            AstStmt::ExpressionStatement(e) => write!(f, "{e}"),
+            AstStmt::Print(ast) => write!(f, "print {ast};"),
+            AstStmt::Expression(e) => write!(f, "{e}"),
         }
     }
 }

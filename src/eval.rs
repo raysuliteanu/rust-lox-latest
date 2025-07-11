@@ -4,6 +4,7 @@ use crate::model::{Ast, AstExpr, AstStmt};
 use crate::parser::Parser;
 use crate::token::{Lexeme, Token};
 
+#[derive(PartialEq)]
 pub enum EvalValue {
     Number(f64),
     String(String),
@@ -130,19 +131,50 @@ impl<'eval> Eval<'_> {
         let result = match op.lexeme {
             Lexeme::Plus(_) => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l + r),
-                (EvalValue::String(s_l), EvalValue::String(s_r)) => EvalValue::String(s_l + &s_r),
+                (EvalValue::String(l), EvalValue::String(r)) => EvalValue::String(l + &r),
                 _ => todo!("Operands must be two numbers or two strings."),
             },
-            Lexeme::Minus(_) => todo!(),
-            Lexeme::Star(_) => todo!(),
-            Lexeme::Slash(_) => todo!(),
-            Lexeme::EqEq(_) => todo!(),
-            Lexeme::BangEq(_) => todo!(),
-            Lexeme::Less(_) => todo!(),
-            Lexeme::LessEq(_) => todo!(),
-            Lexeme::Greater(_) => todo!(),
-            Lexeme::GreaterEq(_) => todo!(),
-            _ => todo!(),
+            Lexeme::Minus(_) => match (left_expr, right_expr) {
+                (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l - r),
+                _ => todo!("invalid operation {}", op.lexeme),
+            },
+            Lexeme::Star(_) => match (left_expr, right_expr) {
+                (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l * r),
+                _ => todo!("invalid operation {}", op.lexeme),
+            },
+            Lexeme::Slash(_) => match (left_expr, right_expr) {
+                (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l / r),
+                _ => todo!("invalid operation {}", op.lexeme),
+            },
+            Lexeme::EqEq(_) => match (left_expr, right_expr) {
+                (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l == r),
+                (EvalValue::String(l), EvalValue::String(r)) => EvalValue::Boolean(l == r),
+                (EvalValue::Boolean(l), EvalValue::Boolean(r)) => EvalValue::Boolean(l == r),
+                _ => todo!("invalid operation {}", op.lexeme),
+            },
+            Lexeme::BangEq(_) => match (left_expr, right_expr) {
+                (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l != r),
+                (EvalValue::String(l), EvalValue::String(r)) => EvalValue::Boolean(l != r),
+                (EvalValue::Boolean(l), EvalValue::Boolean(r)) => EvalValue::Boolean(l != r),
+                _ => todo!("invalid operation {}", op.lexeme),
+            },
+            Lexeme::Less(_) => match (left_expr, right_expr) {
+                (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l < r),
+                _ => todo!("invalid operation {}", op.lexeme),
+            },
+            Lexeme::LessEq(_) => match (left_expr, right_expr) {
+                (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l <= r),
+                _ => todo!("invalid operation {}", op.lexeme),
+            },
+            Lexeme::Greater(_) => match (left_expr, right_expr) {
+                (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l > r),
+                _ => todo!("invalid operation {}", op.lexeme),
+            },
+            Lexeme::GreaterEq(_) => match (left_expr, right_expr) {
+                (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l >= r),
+                _ => todo!("invalid operation {}", op.lexeme),
+            },
+            _ => todo!("invalid operation {}", op.lexeme),
         };
 
         Ok(result)

@@ -8,7 +8,7 @@ pub enum Ast {
     Class,
     Function,
     // name, initializer
-    Variable(Token, Option<Box<Ast>>),
+    Variable(Token, Option<Box<AstExpr>>),
     Block(Vec<AstStmt>),
     Statement(AstStmt),
     Expression(AstExpr),
@@ -17,11 +17,11 @@ pub enum Ast {
 #[derive(Debug, PartialEq)]
 pub enum AstStmt {
     // condition, then, else
-    If(Box<Ast>, Box<Ast>, Option<Box<Ast>>),
+    If(Box<AstExpr>, Box<Ast>, Option<Box<Ast>>),
     // cond, body
-    While(Box<Ast>, Box<Ast>),
+    While(Box<AstExpr>, Box<Ast>),
     For,
-    Return(Option<Box<Ast>>),
+    Return(Option<Box<AstExpr>>),
     Print(AstExpr),
     Expression(AstExpr),
 }
@@ -34,20 +34,20 @@ pub enum AstExpr {
     },
     // expr AND/OR expr
     Logical {
-        op: Box<Ast>,
-        left: Box<Ast>,
-        right: Box<Ast>,
+        op: Box<Token>,
+        left: Box<AstExpr>,
+        right: Box<AstExpr>,
     },
     Terminal(Token),
-    Group(Box<Ast>),
+    Group(Box<AstExpr>),
     Unary {
-        op: Box<Ast>,
-        exp: Box<Ast>,
+        op: Box<Token>,
+        exp: Box<AstExpr>,
     },
     Binary {
-        op: Box<Ast>,
-        left: Box<Ast>,
-        right: Box<Ast>,
+        op: Box<Token>,
+        left: Box<AstExpr>,
+        right: Box<AstExpr>,
     },
 }
 
@@ -79,60 +79,63 @@ impl Display for AstExpr {
         match self {
             AstExpr::Assignment { id, expr } => todo!(),
             AstExpr::Logical { op, left, right } => todo!("logical"),
-            AstExpr::Unary { op, exp } => write!(f, "({op} {exp})"),
+            AstExpr::Unary { op, exp } => write!(f, "({} {exp})", print_ast_token(op)),
             AstExpr::Binary { op, left, right } => {
-                write!(f, "({op} {left} {right})")
+                write!(f, "({} {left} {right})", print_ast_token(op))
             }
             AstExpr::Group(ast) => write!(f, "(group {ast})"),
-            AstExpr::Terminal(token) => match &token.lexeme {
-                Lexeme::True(v)
-                | Lexeme::False(v)
-                | Lexeme::Nil(v)
-                | Lexeme::And(v)
-                | Lexeme::Or(v)
-                | Lexeme::Class(v)
-                | Lexeme::For(v)
-                | Lexeme::Fun(v)
-                | Lexeme::If(v)
-                | Lexeme::Else(v)
-                | Lexeme::Return(v)
-                | Lexeme::Super(v)
-                | Lexeme::This(v)
-                | Lexeme::Var(v)
-                | Lexeme::While(v)
-                | Lexeme::Print(v)
-                | Lexeme::EqEq(v)
-                | Lexeme::BangEq(v)
-                | Lexeme::LessEq(v)
-                | Lexeme::GreaterEq(v)
-                | Lexeme::Identifier(v)
-                | Lexeme::String(v) => write!(f, "{}", v.to_lowercase()),
-                Lexeme::LeftParen(v)
-                | Lexeme::RightParen(v)
-                | Lexeme::LeftBrace(v)
-                | Lexeme::RightBrace(v)
-                | Lexeme::Comma(v)
-                | Lexeme::Dot(v)
-                | Lexeme::Minus(v)
-                | Lexeme::Plus(v)
-                | Lexeme::SemiColon(v)
-                | Lexeme::Star(v)
-                | Lexeme::Eq(v)
-                | Lexeme::Bang(v)
-                | Lexeme::Less(v)
-                | Lexeme::Greater(v)
-                | Lexeme::Slash(v) => write!(f, "{v}"),
-                Lexeme::Number(_, v) => {
-                    if *v == v.trunc() {
-                        write!(f, "{v}.0")
-                    } else {
-                        write!(f, "{v}")
-                    }
-                }
-
-                Lexeme::Eof(_) => unreachable!(),
-            },
+            AstExpr::Terminal(token) => write!(f, "{}", print_ast_token(token)),
         }
+    }
+}
+
+fn print_ast_token(token: &Token) -> String {
+    match &token.lexeme {
+        Lexeme::True(v)
+        | Lexeme::False(v)
+        | Lexeme::Nil(v)
+        | Lexeme::And(v)
+        | Lexeme::Or(v)
+        | Lexeme::Class(v)
+        | Lexeme::For(v)
+        | Lexeme::Fun(v)
+        | Lexeme::If(v)
+        | Lexeme::Else(v)
+        | Lexeme::Return(v)
+        | Lexeme::Super(v)
+        | Lexeme::This(v)
+        | Lexeme::Var(v)
+        | Lexeme::While(v)
+        | Lexeme::Print(v)
+        | Lexeme::EqEq(v)
+        | Lexeme::BangEq(v)
+        | Lexeme::LessEq(v)
+        | Lexeme::GreaterEq(v)
+        | Lexeme::Identifier(v)
+        | Lexeme::String(v) => v.to_lowercase(),
+        Lexeme::LeftParen(v)
+        | Lexeme::RightParen(v)
+        | Lexeme::LeftBrace(v)
+        | Lexeme::RightBrace(v)
+        | Lexeme::Comma(v)
+        | Lexeme::Dot(v)
+        | Lexeme::Minus(v)
+        | Lexeme::Plus(v)
+        | Lexeme::SemiColon(v)
+        | Lexeme::Star(v)
+        | Lexeme::Eq(v)
+        | Lexeme::Bang(v)
+        | Lexeme::Less(v)
+        | Lexeme::Greater(v)
+        | Lexeme::Slash(v) => format!("{v}"),
+        Lexeme::Number(_, v) => {
+            if *v == v.trunc() {
+                format!("{v}.0")
+            } else {
+                format!("{v}")
+            }
+        }
+        Lexeme::Eof(_) => unreachable!(),
     }
 }
 

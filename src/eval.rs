@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use crate::model::{Ast, AstExpr, AstStmt};
 use crate::parser::Parser;
+use crate::token::Token;
 
 pub enum EvalValue<'e> {
     Number(f64),
@@ -39,15 +40,16 @@ impl<'eval> Eval<'_> {
         self.eval(tree.iter())
     }
 
-    fn eval(&self, mut tree: std::slice::Iter<'_, Ast>) -> EvalResult {
-        while let Some(ast) = tree.next() {
+    fn eval(&self, tree: std::slice::Iter<'_, Ast>) -> EvalResult {
+        for ast in tree {
             let _result = self.eval_ast(ast)?;
+            // TODO: deal with result
         }
 
         Ok(EvalValue::Number(0.0))
     }
 
-    fn eval_ast(&self, ast: &Ast) -> EvalResult {
+    fn eval_ast(&self, ast: &'eval Ast) -> EvalResult<'eval> {
         match ast {
             Ast::Class => todo!(),
             Ast::Function => todo!(),
@@ -58,30 +60,67 @@ impl<'eval> Eval<'_> {
         }
     }
 
-    fn eval_stmt(&self, stmt: &AstStmt) -> EvalResult {
+    fn eval_stmt(&self, stmt: &'eval AstStmt) -> EvalResult<'eval> {
         match stmt {
             AstStmt::Expression(expr) => self.eval_expr(expr),
+            AstStmt::Print(ast) => self.eval_print_stmt(ast),
             AstStmt::For => todo!(),
             AstStmt::If(_ast, _ast1, _ast2) => todo!(),
-            AstStmt::Print(ast) => self.eval_print_stmt(ast),
             AstStmt::Return(_ast) => todo!(),
             AstStmt::While(_ast, _ast1) => todo!(),
         }
     }
 
-    fn eval_expr(&self, expr: &AstExpr) -> EvalResult {
+    fn eval_expr(&self, expr: &'eval AstExpr) -> EvalResult<'eval> {
         match expr {
+            AstExpr::Terminal(token) => self.eval_terminal(token),
+            AstExpr::Group(expr) => self.eval_expr(expr),
+            AstExpr::Unary { op, exp } => self.eval_unary(op, exp),
+            AstExpr::Binary { op, left, right } => self.eval_binary(op, left, right),
             AstExpr::Assignment { id, expr } => todo!("assignment"),
             AstExpr::Logical { op, left, right } => todo!("logical expr"),
-            AstExpr::Terminal(token) => todo!("terminal"),
-            AstExpr::Group(ast) => todo!("group"),
-            AstExpr::Unary { op, exp } => todo!("unary"),
-            AstExpr::Binary { op, left, right } => todo!("binary"),
         }
     }
 
-    fn eval_print_stmt(&self, expr: &AstExpr) -> EvalResult {
+    fn eval_print_stmt(&self, expr: &'eval AstExpr) -> EvalResult<'eval> {
         println!("{}", self.eval_expr(expr)?);
         Ok(EvalValue::Nil)
+    }
+
+    fn eval_terminal(&self, token: &'eval Token) -> EvalResult<'eval> {
+        let val = match &token.lexeme {
+            crate::token::Lexeme::Number(_, v) => EvalValue::Number(*v),
+            crate::token::Lexeme::String(s) => EvalValue::String(s),
+            crate::token::Lexeme::Identifier(_i) => todo!("identifier"),
+            crate::token::Lexeme::True(_) => EvalValue::Boolean(true),
+            crate::token::Lexeme::False(_) => EvalValue::Boolean(false),
+            crate::token::Lexeme::Nil(_) => EvalValue::Nil,
+            _ => unimplemented!("{}", token.lexeme),
+        };
+
+        Ok(val)
+    }
+
+    fn eval_unary(&self, op: &Token, expr: &AstExpr) -> EvalResult<'eval> {
+        let val = self.eval_expr(expr)?;
+        let result = match op.lexeme {
+            crate::token::Lexeme::Bang(_) => match val {
+                EvalValue::Number(_) => EvalValue::Boolean(false),
+                EvalValue::Boolean(v) => EvalValue::Boolean(!v),
+                EvalValue::Nil => EvalValue::Boolean(true),
+                _ => todo!("invalid op {} for {val}", op.lexeme),
+            },
+            crate::token::Lexeme::Minus(_) => match val {
+                EvalValue::Number(v) => EvalValue::Number(-v),
+                _ => todo!("invalid op {} for {val}", op.lexeme),
+            },
+            _ => todo!("invalid op {} for {val}", op.lexeme),
+        };
+
+        Ok(result)
+    }
+
+    fn eval_binary(&self, op: &Token, left: &AstExpr, right: &AstExpr) -> EvalResult<'eval> {
+        todo!()
     }
 }

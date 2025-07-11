@@ -47,13 +47,16 @@ fn main() -> Result<ExitCode> {
         LoxCommands::Parse { filename } => {
             let source = get_source(filename)?;
             if let Err(e) = parser::Parser::new(&source, true).parse() {
-                eprintln!("{e}");
-                rc = 65;
+                rc = e;
             }
         }
 
         LoxCommands::Evaluate { filename } => {
-            let _source = get_source(filename)?;
+            let source = get_source(filename)?;
+
+            if let Err(e) = eval::Eval::new(&source).evaluate() {
+                rc = e;
+            }
         }
 
         LoxCommands::Run { filename } => {

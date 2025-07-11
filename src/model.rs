@@ -67,7 +67,13 @@ impl Display for Ast {
                 }
                 write!(f, ";")
             }
-            Ast::Block(_b) => todo!(),
+            Ast::Block(block) => {
+                writeln!(f, "{{")?;
+                for s in block {
+                    write!(f, "{s}")?;
+                }
+                writeln!(f, "}}")
+            }
             Ast::Statement(s) => write!(f, "{s}"),
             Ast::Expression(e) => write!(f, "{e}"),
         }
@@ -77,8 +83,12 @@ impl Display for Ast {
 impl Display for AstExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AstExpr::Assignment { id, expr } => todo!(),
-            AstExpr::Logical { op, left, right } => todo!("logical"),
+            AstExpr::Assignment { id: _, expr: _ } => todo!(),
+            AstExpr::Logical {
+                op: _,
+                left: _,
+                right: _,
+            } => todo!("logical"),
             AstExpr::Unary { op, exp } => write!(f, "({} {exp})", print_ast_token(op)),
             AstExpr::Binary { op, left, right } => {
                 write!(f, "({} {left} {right})", print_ast_token(op))

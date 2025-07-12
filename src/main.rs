@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use parser::Ast;
+use log::trace;
+use model::Ast;
 use std::{
     fs,
     io::{BufRead as _, Read, Write as _, stdin, stdout},
@@ -8,8 +9,10 @@ use std::{
     process::ExitCode,
 };
 
-use crate::token::Scanner;
+use crate::{eval::EvalErrors, parser::ParseError, token::Scanner};
 
+mod eval;
+mod model;
 mod parser;
 mod span;
 mod token;
@@ -18,15 +21,14 @@ mod token;
 struct Lox {
     #[command(subcommand)]
     commands: LoxCommands,
-    filename: Option<String>,
 }
 
 #[derive(Subcommand)]
 enum LoxCommands {
-    Tokenize,
-    Parse,
-    Evaluate,
-    Run,
+    Tokenize { filename: String },
+    Parse { filename: String },
+    Evaluate { filename: String },
+    Run { filename: Option<String> },
 }
 
 fn main() -> Result<ExitCode> {
@@ -34,41 +36,44 @@ fn main() -> Result<ExitCode> {
 
     let lox = Lox::parse();
 
+    let mut rc = 0;
     match lox.commands {
-        LoxCommands::Tokenize => {
-            if let Some(file) = lox.filename {
-                let source = get_source(file)?;
-                let _ = Scanner::scan(&source)?;
-            } else {
-                // TODO: usage error, filename required
+        LoxCommands::Tokenize { filename } => {
+            let source = get_source(filename)?;
+            if let Err(e) = Scanner::new(&source, true).scan() {
+                rc = e;
             }
         }
-        LoxCommands::Parse => {
-            if let Some(file) = lox.filename {
-                let source = get_source(file)?;
-            } else {
-                // TODO: usage error, filename required
+        LoxCommands::Parse { filename } => {
+            let source = get_source(filename)?;
+            if let Err(_e) = parser::Parser::new(&source, true).parse() {
+                rc = 65;
             }
         }
 
-        LoxCommands::Evaluate => {
-            if let Some(file) = lox.filename {
-                let source = get_source(file)?;
-            } else {
-                // TODO: usage error, filename required
+        LoxCommands::Evaluate { filename } => {
+            let source = get_source(filename)?;
+            match eval::Eval::new(&source).evaluate() {
+                Ok(r) => println!("{r}"),
+                Err(e) => {
+                    eprintln!("{e}");
+                    rc = if e.downcast_ref::<ParseError>().is_some() {
+                        65
+                    } else {
+                        70
+                    };
+                }
             }
         }
 
-        LoxCommands::Run => {
-            if let Some(file) = lox.filename {
-                let source = get_source(file)?;
+        LoxCommands::Run { filename } => {
+            if let Some(file) = filename {
+                let _source = get_source(file)?;
             } else {
-                repl();
+                let _ = repl();
             }
         }
-    }
-
-    let rc = 0;
+    };
 
     Ok(ExitCode::from(rc))
 }
@@ -92,6 +97,7 @@ pub fn repl() -> anyhow::Result<Vec<Ast>> {
 }
 
 fn get_source(filename: String) -> anyhow::Result<String> {
+    trace!("get_source({filename})");
     let source = fs::read_to_string(PathBuf::from(&filename)).with_context(|| filename)?;
 
     Ok(source)

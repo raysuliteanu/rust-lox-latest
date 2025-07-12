@@ -9,7 +9,7 @@ use std::{
     process::ExitCode,
 };
 
-use crate::token::Scanner;
+use crate::{eval::EvalErrors, parser::ParseError, token::Scanner};
 
 mod eval;
 mod model;
@@ -46,16 +46,23 @@ fn main() -> Result<ExitCode> {
         }
         LoxCommands::Parse { filename } => {
             let source = get_source(filename)?;
-            if let Err(e) = parser::Parser::new(&source, true).parse() {
-                rc = e;
+            if let Err(_e) = parser::Parser::new(&source, true).parse() {
+                rc = 65;
             }
         }
 
         LoxCommands::Evaluate { filename } => {
             let source = get_source(filename)?;
-
-            if let Err(e) = eval::Eval::new(&source).evaluate() {
-                rc = e;
+            match eval::Eval::new(&source).evaluate() {
+                Ok(r) => println!("{r}"),
+                Err(e) => {
+                    eprintln!("{e}");
+                    rc = if e.downcast_ref::<ParseError>().is_some() {
+                        65
+                    } else {
+                        70
+                    };
+                }
             }
         }
 

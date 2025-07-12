@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use std::iter::Peekable;
 
 use log::trace;
@@ -7,7 +8,6 @@ use crate::model::{Ast, AstExpr, AstStmt};
 use crate::token::{Lexeme, Scanner, Token, lexeme_from};
 
 type PeekableTokenIter<'a> = Peekable<std::slice::Iter<'a, Token>>;
-pub type ParseResult<T> = Result<T, u8>;
 
 #[derive(Error, Debug)]
 pub enum ParseError {
@@ -20,6 +20,8 @@ pub enum ParseError {
     #[error("Unexpected EOF")]
     UnexpectedEof,
 }
+
+pub type ParseResult<T> = Result<T>;
 
 macro_rules! ast_missing_token {
     ($e: expr, $a: expr) => {
@@ -99,7 +101,9 @@ impl<'parser> Parser<'parser> {
                 trace!("no tokens scanned");
                 return Ok(vec![]);
             }
+
             trace!("parsing {} tokens", tokens.len());
+
             match self.program(&mut tokens.iter().peekable()) {
                 Ok(v) => {
                     v.iter().for_each(|node| println!("{node}"));
@@ -107,15 +111,15 @@ impl<'parser> Parser<'parser> {
                 }
                 Err(e) => {
                     eprintln!("{e}");
-                    Err(65)
+                    Err(e)
                 }
             }
         } else {
-            Err(65)
+            Err(ParseError::UnexpectedEof.into())
         }
     }
 
-    fn program(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Vec<Ast>> {
+    fn program(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Vec<Ast>> {
         let mut ast: Vec<Ast> = Vec::new();
 
         while let Some(token) = tokens.peek()
@@ -130,7 +134,7 @@ impl<'parser> Parser<'parser> {
         Ok(ast)
     }
 
-    fn declaration(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn declaration(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         if let Some(token) = tokens.peek() {
             match token.lexeme {
                 Lexeme::Class(_) => self.class_decl(tokens),
@@ -143,16 +147,16 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn class_decl(&self, _tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn class_decl(&self, _tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         todo!("class decl")
     }
 
-    fn fun_decl(&self, _tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn fun_decl(&self, _tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         todo!("fun decl")
     }
 
     // varDecl → "var" IDENTIFIER ( "=" expression )? ";" ;
-    fn var_decl(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn var_decl(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         trace!("var_decl: {:?}", tokens.peek());
 
         // eat 'var' token
@@ -185,7 +189,7 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn statement(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn statement(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         trace!("statement: {:?}", tokens.peek());
         let r = match tokens.peek() {
             Some(token) => match token.lexeme {
@@ -211,17 +215,17 @@ impl<'parser> Parser<'parser> {
         Ok(r)
     }
 
-    fn parse_block(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn parse_block(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         trace!("block_stmt: {:?}", tokens.peek());
         todo!("parse block")
     }
 
-    fn for_stmt(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn for_stmt(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         trace!("for_stmt: {:?}", tokens.peek());
         todo!("parse for stmt")
     }
 
-    fn if_stmt(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn if_stmt(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         trace!("if_stmt: {:?}", tokens.peek());
         let if_token = tokens.next().unwrap();
         assert_eq!(if_token.lexeme, lexeme_from("if"));
@@ -244,7 +248,7 @@ impl<'parser> Parser<'parser> {
         )))
     }
 
-    fn while_stmt(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn while_stmt(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         trace!("while_stmt: {:?}", tokens.peek());
         let while_token = tokens.next().unwrap();
         assert_eq!(while_token.lexeme, lexeme_from("while"));
@@ -258,7 +262,7 @@ impl<'parser> Parser<'parser> {
         )))
     }
 
-    fn print_stmt(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn print_stmt(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         trace!("print_stmt: {:?}", tokens.peek());
 
         let print_token = tokens.next().unwrap();
@@ -274,7 +278,7 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn return_stmt(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn return_stmt(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         trace!("return_stmt: {:?}", tokens.peek());
 
         // Consume the 'return' token first
@@ -307,7 +311,7 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn expression_statement(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<Ast> {
+    fn expression_statement(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         let token = tokens.peek();
         trace!("expr_stmt: {token:?}");
         let expr = self.expression(tokens)?;
@@ -320,12 +324,12 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn expression(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<AstExpr> {
+    fn expression(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
         trace!("expr: {:?}", tokens.peek());
         self.equality(tokens)
     }
 
-    fn equality(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<AstExpr> {
+    fn equality(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
         trace!("equality: {:?}", tokens.peek());
         let mut left = self.comparison(tokens)?;
 
@@ -340,7 +344,7 @@ impl<'parser> Parser<'parser> {
         Ok(left)
     }
 
-    fn comparison(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<AstExpr> {
+    fn comparison(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
         trace!("comparison: {:?}", tokens.peek());
         let mut left = self.term(tokens)?;
 
@@ -358,7 +362,7 @@ impl<'parser> Parser<'parser> {
         Ok(left)
     }
 
-    fn term(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<AstExpr> {
+    fn term(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
         trace!("term: {:?}", tokens.peek());
         let mut left = self.factor(tokens)?;
 
@@ -373,7 +377,7 @@ impl<'parser> Parser<'parser> {
         Ok(left)
     }
 
-    fn factor(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<AstExpr> {
+    fn factor(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
         trace!("factor: {:?}", tokens.peek());
         let mut left = self.unary(tokens)?;
 
@@ -388,7 +392,7 @@ impl<'parser> Parser<'parser> {
         Ok(left)
     }
 
-    fn unary(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<AstExpr> {
+    fn unary(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
         trace!("unary: {:?}", tokens.peek());
         if let Some(op_token) =
             tokens.next_if(|t| matches!(t.lexeme, Lexeme::Minus(_) | Lexeme::Bang(_)))
@@ -400,7 +404,7 @@ impl<'parser> Parser<'parser> {
         }
     }
 
-    fn primary(&self, tokens: &mut PeekableTokenIter) -> anyhow::Result<AstExpr> {
+    fn primary(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
         trace!("primary: {:?}", tokens.peek());
         if let Some(token) = tokens.next_if(|t| {
             matches!(

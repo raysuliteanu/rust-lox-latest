@@ -84,13 +84,15 @@ macro_rules! ast_terminal {
 pub struct Parser<'parser> {
     source: &'parser str,
     expression_mode: bool,
+    print_ast: bool,
 }
 
 impl<'parser> Parser<'parser> {
-    pub fn new(source: &'parser str, expression_mode: bool) -> Parser<'parser> {
+    pub fn new(source: &'parser str, expression_mode: bool, print_ast: bool) -> Parser<'parser> {
         Parser {
             source,
             expression_mode,
+            print_ast,
         }
     }
 
@@ -106,7 +108,10 @@ impl<'parser> Parser<'parser> {
 
             match self.program(&mut tokens.iter().peekable()) {
                 Ok(v) => {
-                    v.iter().for_each(|node| println!("{node}"));
+                    if self.print_ast {
+                        v.iter().for_each(|node| println!("{node}"));
+                    }
+
                     Ok(v)
                 }
                 Err(e) => {
@@ -534,13 +539,13 @@ mod tests {
     #[test]
     fn test_parser_new() {
         let source = "print 42;";
-        let parser = Parser::new(source, true);
+        let parser = Parser::new(source, true, true);
         assert_eq!(parser.source, source);
     }
 
     #[test]
     fn test_parse_empty_source() {
-        let parser = Parser::new("", true);
+        let parser = Parser::new("", true, true);
         let result = parser.parse();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), vec![]);
@@ -548,7 +553,7 @@ mod tests {
 
     #[test]
     fn test_parse_simple_print_statement() {
-        let parser = Parser::new("print 42;", true);
+        let parser = Parser::new("print 42;", true, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -558,7 +563,7 @@ mod tests {
 
     #[test]
     fn test_parse_return_statement_with_value() {
-        let parser = Parser::new("return 123;", true);
+        let parser = Parser::new("return 123;", true, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -568,7 +573,7 @@ mod tests {
 
     #[test]
     fn test_parse_return_statement_without_value() {
-        let parser = Parser::new("return;", true);
+        let parser = Parser::new("return;", true, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -578,7 +583,7 @@ mod tests {
 
     #[test]
     fn test_parse_expression_statement() {
-        let parser = Parser::new("42;", false);
+        let parser = Parser::new("42;", false, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -588,7 +593,7 @@ mod tests {
 
     #[test]
     fn test_parse_binary_expression() {
-        let parser = Parser::new("1 + 2;", false);
+        let parser = Parser::new("1 + 2;", false, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -598,7 +603,7 @@ mod tests {
 
     #[test]
     fn test_parse_unary_expression() {
-        let parser = Parser::new("-5;", false);
+        let parser = Parser::new("-5;", false, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -608,7 +613,7 @@ mod tests {
 
     #[test]
     fn test_parse_grouped_expression() {
-        let parser = Parser::new("(42);", false);
+        let parser = Parser::new("(42);", false, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -618,14 +623,14 @@ mod tests {
 
     #[test]
     fn test_parse_equality_expression() {
-        let parser = Parser::new("1 == 2;", false);
+        let parser = Parser::new("1 == 2;", false, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
         assert_eq!(ast.len(), 1);
         assert_eq!(ast[0].to_string(), "(== 1.0 2.0)");
 
-        let parser = Parser::new("true != false;", false);
+        let parser = Parser::new("true != false;", false, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -635,14 +640,14 @@ mod tests {
 
     #[test]
     fn test_parse_comparison_expression() {
-        let parser = Parser::new("5 > 3;", false);
+        let parser = Parser::new("5 > 3;", false, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
         assert_eq!(ast.len(), 1);
         assert_eq!(ast[0].to_string(), "(> 5.0 3.0)");
 
-        let parser = Parser::new("2 <= 4;", false);
+        let parser = Parser::new("2 <= 4;", false, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -652,14 +657,14 @@ mod tests {
 
     #[test]
     fn test_parse_factor_expression() {
-        let parser = Parser::new("6 * 7;", false);
+        let parser = Parser::new("6 * 7;", false, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
         assert_eq!(ast.len(), 1);
         assert_eq!(ast[0].to_string(), "(* 6.0 7.0)");
 
-        let parser = Parser::new("8 / 2;", false);
+        let parser = Parser::new("8 / 2;", false, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -669,7 +674,7 @@ mod tests {
 
     #[test]
     fn test_parse_complex_expression() {
-        let parser = Parser::new("1 + 2 * 3;", false);
+        let parser = Parser::new("1 + 2 * 3;", false, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -679,7 +684,7 @@ mod tests {
 
     #[test]
     fn test_parse_multiple_statements() {
-        let parser = Parser::new("print 1; return 2;", false);
+        let parser = Parser::new("print 1; return 2;", false, true);
         let result = parser.parse();
         assert!(result.is_ok());
         let ast = result.unwrap();
@@ -690,21 +695,21 @@ mod tests {
 
     #[test]
     fn test_parse_error_missing_semicolon() {
-        let parser = Parser::new("print 42", true);
+        let parser = Parser::new("print 42", true, true);
         let result = parser.parse();
         assert!(result.is_err());
     }
 
     #[test]
     fn test_parse_error_missing_closing_paren() {
-        let parser = Parser::new("(42;", true);
+        let parser = Parser::new("(42;", true, true);
         let result = parser.parse();
         assert!(result.is_err());
     }
 
     #[test]
     fn test_parse_error_unexpected_eof() {
-        let parser = Parser::new("print", true);
+        let parser = Parser::new("print", true, true);
         let result = parser.parse();
         assert!(result.is_err());
     }

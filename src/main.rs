@@ -9,7 +9,11 @@ use std::{
     process::ExitCode,
 };
 
-use crate::{eval::EvalErrors, parser::ParseError, token::Scanner};
+use crate::{
+    eval::{EvalErrors, EvalValue},
+    parser::ParseError,
+    token::Scanner,
+};
 
 mod eval;
 mod model;
@@ -46,14 +50,14 @@ fn main() -> Result<ExitCode> {
         }
         LoxCommands::Parse { filename } => {
             let source = get_source(filename)?;
-            if let Err(_e) = parser::Parser::new(&source, true).parse() {
+            if let Err(_e) = parser::Parser::new(&source, true, true).parse() {
                 rc = 65;
             }
         }
 
         LoxCommands::Evaluate { filename } => {
             let source = get_source(filename)?;
-            match eval::Eval::new(&source).evaluate() {
+            match eval::Eval::new(&source, true).evaluate() {
                 Ok(r) => println!("{r}"),
                 Err(e) => {
                     eprintln!("{e}");
@@ -68,9 +72,24 @@ fn main() -> Result<ExitCode> {
 
         LoxCommands::Run { filename } => {
             if let Some(file) = filename {
-                let _source = get_source(file)?;
+                let source = get_source(file)?;
+                match eval::Eval::new(&source, false).evaluate() {
+                    Ok(r) => {
+                        if r != EvalValue::Nil {
+                            println!("{r}");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{e}");
+                        rc = if e.downcast_ref::<ParseError>().is_some() {
+                            65
+                        } else {
+                            70
+                        };
+                    }
+                }
             } else {
-                let _ = repl();
+                repl()?;
             }
         }
     };
@@ -78,22 +97,25 @@ fn main() -> Result<ExitCode> {
     Ok(ExitCode::from(rc))
 }
 
-pub fn repl() -> anyhow::Result<Vec<Ast>> {
+pub fn repl() -> anyhow::Result<()> {
     let mut stdin = std::io::stdin().lock();
     loop {
         let mut expr = String::new();
         print!("> ");
-        let _ = stdout().flush();
-        let _ = stdin.read_line(&mut expr)?;
+        stdout().flush()?;
+        let cnt = stdin.read_line(&mut expr)?;
+        trace!("read {cnt} bytes");
 
         let source = expr.trim_end();
 
         if source == "q" || source == "quit" {
             break;
         }
+
+        eval::Eval::new(source, false).evaluate()?;
     }
 
-    Ok(vec![])
+    Ok(())
 }
 
 fn get_source(filename: String) -> anyhow::Result<String> {

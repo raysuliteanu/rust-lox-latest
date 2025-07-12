@@ -594,21 +594,21 @@ mod tests {
     fn test_evaluate_simple_expression() {
         let eval = Eval::new("42;");
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::Number(0.0)); // Returns default from eval method
+        assert_eq!(result, EvalValue::Number(42.0)); // Returns default from eval method
     }
 
     #[test]
     fn test_evaluate_print_statement() {
         let eval = Eval::new("print 42;");
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::Number(0.0)); // Returns default from eval method
+        assert_eq!(result, EvalValue::Nil);
     }
 
     #[test]
     fn test_evaluate_complex_expression() {
         let eval = Eval::new("1 + 2 * 3;");
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::Number(0.0)); // Returns default from eval method
+        assert_eq!(result, EvalValue::Number(7.0)); // Returns default from eval method
     }
 
     #[test]

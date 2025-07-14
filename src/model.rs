@@ -9,7 +9,7 @@ pub enum Ast {
     Function,
     // name, initializer
     Variable(Token, Option<Box<AstExpr>>),
-    Block(Vec<AstStmt>),
+    Block(Vec<Ast>),
     Statement(AstStmt),
     Expression(AstExpr),
 }
@@ -34,18 +34,18 @@ pub enum AstExpr {
     },
     // expr AND/OR expr
     Logical {
-        op: Box<Token>,
+        op: Token,
         left: Box<AstExpr>,
         right: Box<AstExpr>,
     },
     Terminal(Token),
     Group(Box<AstExpr>),
     Unary {
-        op: Box<Token>,
+        op: Token,
         exp: Box<AstExpr>,
     },
     Binary {
-        op: Box<Token>,
+        op: Token,
         left: Box<AstExpr>,
         right: Box<AstExpr>,
     },
@@ -83,12 +83,10 @@ impl Display for Ast {
 impl Display for AstExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AstExpr::Assignment { id: _, expr: _ } => todo!(),
-            AstExpr::Logical {
-                op: _,
-                left: _,
-                right: _,
-            } => todo!("logical"),
+            AstExpr::Assignment { id, expr } => write!(f, "{id} = {expr}"),
+            AstExpr::Logical { op, left, right } => {
+                write!(f, "({} {left} {right})", print_ast_token(op))
+            }
             AstExpr::Unary { op, exp } => write!(f, "({} {exp})", print_ast_token(op)),
             AstExpr::Binary { op, left, right } => {
                 write!(f, "({} {left} {right})", print_ast_token(op))
@@ -101,43 +99,42 @@ impl Display for AstExpr {
 
 fn print_ast_token(token: &Token) -> String {
     match &token.lexeme {
-        Lexeme::True(v)
-        | Lexeme::False(v)
-        | Lexeme::Nil(v)
-        | Lexeme::And(v)
-        | Lexeme::Or(v)
-        | Lexeme::Class(v)
-        | Lexeme::For(v)
-        | Lexeme::Fun(v)
-        | Lexeme::If(v)
-        | Lexeme::Else(v)
-        | Lexeme::Return(v)
-        | Lexeme::Super(v)
-        | Lexeme::This(v)
-        | Lexeme::Var(v)
-        | Lexeme::While(v)
-        | Lexeme::Print(v)
-        | Lexeme::EqEq(v)
-        | Lexeme::BangEq(v)
-        | Lexeme::LessEq(v)
-        | Lexeme::GreaterEq(v)
-        | Lexeme::Identifier(v)
-        | Lexeme::String(v) => v.to_lowercase(),
-        Lexeme::LeftParen(v)
-        | Lexeme::RightParen(v)
-        | Lexeme::LeftBrace(v)
-        | Lexeme::RightBrace(v)
-        | Lexeme::Comma(v)
-        | Lexeme::Dot(v)
-        | Lexeme::Minus(v)
-        | Lexeme::Plus(v)
-        | Lexeme::SemiColon(v)
-        | Lexeme::Star(v)
-        | Lexeme::Eq(v)
-        | Lexeme::Bang(v)
-        | Lexeme::Less(v)
-        | Lexeme::Greater(v)
-        | Lexeme::Slash(v) => format!("{v}"),
+        Lexeme::True
+        | Lexeme::False
+        | Lexeme::Nil
+        | Lexeme::And
+        | Lexeme::Or
+        | Lexeme::Class
+        | Lexeme::For
+        | Lexeme::Fun
+        | Lexeme::If
+        | Lexeme::Else
+        | Lexeme::Return
+        | Lexeme::Super
+        | Lexeme::This
+        | Lexeme::Var
+        | Lexeme::While
+        | Lexeme::Print
+        | Lexeme::EqEq
+        | Lexeme::BangEq
+        | Lexeme::LessEq
+        | Lexeme::GreaterEq => token.lexeme.lexeme_str().to_lowercase(),
+        Lexeme::LeftParen
+        | Lexeme::RightParen
+        | Lexeme::LeftBrace
+        | Lexeme::RightBrace
+        | Lexeme::Comma
+        | Lexeme::Dot
+        | Lexeme::Minus
+        | Lexeme::Plus
+        | Lexeme::SemiColon
+        | Lexeme::Star
+        | Lexeme::Eq
+        | Lexeme::Bang
+        | Lexeme::Less
+        | Lexeme::Greater
+        | Lexeme::Slash => token.lexeme.lexeme_str().to_string(),
+        Lexeme::Identifier(v) | Lexeme::String(v) => v.to_lowercase(),
         Lexeme::Number(_, v) => {
             if *v == v.trunc() {
                 format!("{v}.0")
@@ -145,7 +142,7 @@ fn print_ast_token(token: &Token) -> String {
                 format!("{v}")
             }
         }
-        Lexeme::Eof(_) => unreachable!(),
+        Lexeme::Eof => unreachable!(),
     }
 }
 
@@ -153,15 +150,14 @@ impl Display for AstStmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AstStmt::If(cond, then_stmt, else_stmt) => {
-                writeln!(f, "if {cond} {{ {then_stmt} }}")?;
+                write!(f, "if {cond} {then_stmt}")?;
                 if let Some(else_stmt) = else_stmt {
-                    write!(f, "else {{ {else_stmt} }}")?;
+                    write!(f, " else {else_stmt}")?;
                 }
                 Ok(())
             }
             AstStmt::While(cond, body) => {
-                writeln!(f, "while {cond} {{")?;
-                writeln!(f, "{body} }}")
+                write!(f, "while {cond} {body}")
             }
             AstStmt::For => todo!(),
             AstStmt::Return(ast) => {

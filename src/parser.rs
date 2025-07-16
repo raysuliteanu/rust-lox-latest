@@ -9,6 +9,103 @@ use crate::token::{Lexeme, Scanner, Token, lexeme_from};
 
 type PeekableTokenIter<'a> = Peekable<std::slice::Iter<'a, Token>>;
 
+/// Pretty print the AST as a tree structure with proper indentation
+pub fn print_ast(ast: &[Ast]) {
+    fn print_ast_node(ast: &Ast, level: usize) {
+        let indent = "    ".repeat(level);
+        match ast {
+            Ast::Class => println!("{indent}Class"),
+            Ast::Function => println!("{indent}Function"),
+            Ast::Variable(token, initializer) => {
+                println!("{indent}Variable({token:?}, {initializer:?}),");
+            }
+            Ast::Block(nodes) => {
+                println!("{indent}Block(");
+                for node in nodes {
+                    print_ast_node(node, level + 1);
+                }
+                println!("{indent})");
+            }
+            Ast::Statement(stmt) => {
+                println!("{indent}Statement(");
+                print_ast_stmt(stmt, level + 1);
+                println!("{indent})");
+            }
+            Ast::Expression(expr) => {
+                println!("{indent}Expression(");
+                print_ast_expr(expr, level + 1);
+                println!("{indent})");
+            }
+        }
+    }
+
+    fn print_ast_stmt(stmt: &AstStmt, level: usize) {
+        let indent = "    ".repeat(level);
+        match stmt {
+            AstStmt::If(cond, then_block, else_block) => {
+                println!("{indent}If(");
+                print_ast_expr(cond, level + 1);
+                println!("{indent},");
+                print_ast_node(then_block, level + 1);
+                if let Some(else_block) = else_block {
+                    println!("{indent},");
+                    print_ast_node(else_block, level + 1);
+                }
+                println!("{indent})");
+            }
+            AstStmt::While(cond, body) => {
+                println!("{indent}While(");
+                print_ast_expr(cond, level + 1);
+                println!("{indent},");
+                print_ast_node(body, level + 1);
+                println!("{indent})");
+            }
+            AstStmt::Return(expr) => {
+                println!("{indent}Return({expr:?})");
+            }
+            AstStmt::Print(expr) => {
+                println!("{indent}Print(");
+                print_ast_expr(expr, level + 1);
+                println!("{indent})");
+            }
+            AstStmt::Expression(expr) => {
+                print_ast_expr(expr, level);
+            }
+        }
+    }
+
+    fn print_ast_expr(expr: &AstExpr, level: usize) {
+        let indent = "    ".repeat(level);
+        match expr {
+            AstExpr::Assignment { id, expr } => {
+                println!("{indent}Assignment {{ id: \"{id}\", expr: {expr:?} }}");
+            }
+            AstExpr::Logical { op, left, right } => {
+                println!("{indent}Logical {{ op: {op:?}, left: {left:?}, right: {right:?} }}");
+            }
+            AstExpr::Terminal(token) => {
+                println!("{indent}Terminal({token:?})");
+            }
+            AstExpr::Group(expr) => {
+                println!("{indent}Group(");
+                print_ast_expr(expr, level + 1);
+                println!("{indent})");
+            }
+            AstExpr::Unary { op, exp } => {
+                println!("{indent}Unary {{ op: {op:?}, exp: {exp:?} }}");
+            }
+            AstExpr::Binary { op, left, right } => {
+                println!("{indent}Binary {{ op: {op:?}, left: {left:?}, right: {right:?} }}");
+            }
+        }
+    }
+
+    println!("AST:");
+    for node in ast {
+        print_ast_node(node, 0);
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum ParseError {
     #[error("missing token '{}' got '{}'", expected, actual)]
@@ -84,7 +181,49 @@ macro_rules! ast_terminal {
 pub struct Parser<'parser> {
     source: &'parser str,
     expression_mode: bool,
+    pretty_print: bool,
     print_ast: bool,
+}
+
+#[derive(Default, Clone)]
+pub struct ParserBuilder<'parser> {
+    source: &'parser str,
+    expression_mode: Option<bool>,
+    pretty_print: Option<bool>,
+    print_ast: Option<bool>,
+}
+
+impl<'parser> ParserBuilder<'parser> {
+    pub fn new(source: &'parser str) -> Self {
+        ParserBuilder {
+            source,
+            ..Default::default()
+        }
+    }
+
+    pub fn expression_mode(&mut self, expression_mode: bool) -> &mut Self {
+        self.expression_mode = Some(expression_mode);
+        self
+    }
+
+    pub fn pretty_print(&mut self, pretty_print: bool) -> &mut Self {
+        self.pretty_print = Some(pretty_print);
+        self
+    }
+
+    pub fn print_ast(&mut self, print_ast: bool) -> &mut Self {
+        self.print_ast = Some(print_ast);
+        self
+    }
+
+    pub fn build(&self) -> Parser<'parser> {
+        Parser {
+            source: self.source,
+            expression_mode: self.expression_mode.unwrap_or(true),
+            pretty_print: self.pretty_print.unwrap_or(false),
+            print_ast: self.print_ast.unwrap_or(true),
+        }
+    }
 }
 
 impl<'parser> Parser<'parser> {
@@ -93,6 +232,7 @@ impl<'parser> Parser<'parser> {
             source,
             expression_mode,
             print_ast,
+            pretty_print: false,
         }
     }
 
@@ -109,7 +249,11 @@ impl<'parser> Parser<'parser> {
             match self.program(&mut tokens.iter().peekable()) {
                 Ok(v) => {
                     if self.print_ast {
-                        v.iter().for_each(|node| println!("{node}"));
+                        if self.pretty_print {
+                            print_ast(&v);
+                        } else {
+                            v.iter().for_each(|node| println!("{node}"));
+                        }
                     }
 
                     Ok(v)
@@ -321,15 +465,26 @@ impl<'parser> Parser<'parser> {
                 self.expression_statement(tokens)?
             };
 
-            // while loop body
+            // build while loop body
+            // {
+            //    (incr;)
+            //    for_loop_body
+            // }
             let body = if let Some(incr) = incr_expr {
                 Ast::Block(vec![Ast::Expression(incr), body])
             } else {
                 body
             };
 
+            // build while loop condition
+            // while (cond)
+            //     body
             let body = Ast::Statement(AstStmt::While(Box::new(cond_expr), Box::new(body)));
 
+            // build while loop cond initializer
+            // init
+            // while (cond)
+            //     body
             let body = if let Some(init) = init_expr {
                 Ast::Block(vec![init, body])
             } else {

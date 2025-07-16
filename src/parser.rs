@@ -211,6 +211,7 @@ impl<'parser> ParserBuilder<'parser> {
         self
     }
 
+    #[allow(dead_code)]
     pub fn print_ast(&mut self, print_ast: bool) -> &mut Self {
         self.print_ast = Some(print_ast);
         self
@@ -434,7 +435,7 @@ impl<'parser> Parser<'parser> {
                     span: (0, 0, 0).into()
                 })
             } else {
-                // for (init ; cond ; incr)
+                // for (_ ; cond ; _)
                 let expr = self.expression(tokens)?;
                 // must be semicolon after cond
                 let _semicolon = tokens.next();
@@ -443,12 +444,13 @@ impl<'parser> Parser<'parser> {
                 expr
             };
 
-            let incr_expr = if tokens.peek().is_some_and(|t| t.lexeme == lexeme_from(")")) {
+            let close_paren = tokens.next_if(|t| t.lexeme == lexeme_from(")"));
+            let incr_expr = if close_paren.is_some() {
                 // for (init ; cond ; )
                 trace!("for_stmt: no incr expr");
                 None
             } else {
-                // for (init ; cond ; incr)
+                // for (_ ; _ ; incr)
                 let expr = self.expression(tokens)?;
                 let _closing_paren = tokens.next();
                 assert_eq!(_closing_paren.expect(";").lexeme, lexeme_from(")"));
@@ -462,7 +464,8 @@ impl<'parser> Parser<'parser> {
                 trace!("for_stmt: body block end");
                 block
             } else {
-                self.expression_statement(tokens)?
+                trace!("for_stmt: body expression");
+                self.statement(tokens)?
             };
 
             // build while loop body
@@ -618,12 +621,14 @@ impl<'parser> Parser<'parser> {
         // after parsing tokens, if the next token is '=' then ...
         if tokens.next_if(|t| t.lexeme == lexeme_from("=")).is_some() {
             // ... it's an assignment i.e. 'token' is lvalue, so parse rvalue
+            trace!("assignment is assignment");
             let rvalue = self.assignment(tokens)?;
             Ok(AstExpr::Assignment {
                 id: token_lexeme,
                 expr: Box::new(rvalue),
             })
         } else {
+            trace!("assignment -> expression");
             // ... otherwise it was just an expression so return that
             Ok(left)
         }

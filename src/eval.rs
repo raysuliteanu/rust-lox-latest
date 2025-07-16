@@ -182,7 +182,7 @@ impl<'eval> Eval<'_> {
                 self.eval_if_stmt(cond, then_block, else_block)
             }
             AstStmt::Return(_ast) => todo!("return stmts"),
-            AstStmt::While(_ast, _ast1) => todo!("while stmts"),
+            AstStmt::While(cond, body) => self.eval_while(cond, body),
         }
     }
 
@@ -427,6 +427,7 @@ impl<'eval> Eval<'_> {
     }
 
     fn eval_block(&mut self, block: &[Ast]) -> EvalResult {
+        trace!("eval_block");
         self.state.push();
 
         // Use a closure to ensure pop() is always called
@@ -467,14 +468,17 @@ impl<'eval> Eval<'_> {
         then_block: &Ast,
         else_block: &Option<Box<Ast>>,
     ) -> EvalResult {
+        trace!("eval_if");
         let cond_result = self.eval_expr(cond)?;
         if Eval::is_truthy(&cond_result) {
+            trace!("eval_if:then");
             match then_block {
                 Ast::Block(asts) => self.eval_block(asts),
                 Ast::Statement(ast_stmt) => self.eval_stmt(ast_stmt),
                 _ => todo!("then block not block or statement"),
             }
         } else if let Some(ast) = else_block {
+            trace!("eval_if:else");
             match ast.as_ref() {
                 Ast::Block(block) => self.eval_block(block),
                 Ast::Statement(stmt) => self.eval_stmt(stmt),
@@ -483,6 +487,23 @@ impl<'eval> Eval<'_> {
         } else {
             Ok(EvalValue::Nil)
         }
+    }
+
+    fn eval_while(&mut self, cond: &AstExpr, body: &Ast) -> EvalResult {
+        trace!("eval_while");
+        loop {
+            if Eval::is_truthy(&self.eval_expr(cond)?) {
+                match body {
+                    Ast::Block(asts) => self.eval_block(asts)?,
+                    Ast::Statement(ast_stmt) => self.eval_stmt(ast_stmt)?,
+                    _ => todo!("then block not block or statement"),
+                }
+            } else {
+                break;
+            };
+        }
+
+        Ok(EvalValue::Nil)
     }
 }
 
@@ -832,9 +853,7 @@ mod tests {
         };
         assert_eq!(format!("{error1}"), "invalid op ! for test");
 
-        let error2 = EvalErrors::InvalidBinaryOp {
-            op: Lexeme::Plus,
-        };
+        let error2 = EvalErrors::InvalidBinaryOp { op: Lexeme::Plus };
         assert_eq!(format!("{error2}"), "invalid operation PLUS +");
 
         let error3 = EvalErrors::StringsOrNumbers;

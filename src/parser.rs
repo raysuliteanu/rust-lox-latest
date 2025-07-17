@@ -474,7 +474,7 @@ impl<'parser> Parser<'parser> {
             //    for_loop_body
             // }
             let body = if let Some(incr) = incr_expr {
-                Ast::Block(vec![Ast::Expression(incr), body])
+                Ast::Block(vec![body, Ast::Expression(incr)])
             } else {
                 body
             };
@@ -1147,7 +1147,7 @@ mod tests {
         assert!(result.is_ok());
         let ast = result.unwrap();
         assert_eq!(ast.len(), 1);
-        assert_eq!(ast[0].to_string(), "{\n}\n");
+        assert_eq!(ast[0].to_string(), "{\n}");
     }
 
     #[test]
@@ -1157,7 +1157,7 @@ mod tests {
         assert!(result.is_ok());
         let ast = result.unwrap();
         assert_eq!(ast.len(), 1);
-        assert_eq!(ast[0].to_string(), "{\nprint 1.0;print 2.0;}\n");
+        assert_eq!(ast[0].to_string(), "{\nprint 1.0;\nprint 2.0;\n}");
     }
 
     #[test]
@@ -1167,7 +1167,7 @@ mod tests {
         assert!(result.is_ok());
         let ast = result.unwrap();
         assert_eq!(ast.len(), 1);
-        assert_eq!(ast[0].to_string(), "{\n{\nprint 42.0;}\n}\n");
+        assert_eq!(ast[0].to_string(), "{\n{\nprint 42.0;\n}\n}");
     }
 
     #[test]
@@ -1177,6 +1177,6 @@ mod tests {
         assert!(result.is_ok());
         let ast = result.unwrap();
         assert_eq!(ast.len(), 1);
-        assert_eq!(ast[0].to_string(), "{\nvar x = 10.0;print x;}\n");
+        assert_eq!(ast[0].to_string(), "{\nvar x = 10.0;\nprint x;\n}");
     }
 }

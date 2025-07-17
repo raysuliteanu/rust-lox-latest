@@ -27,6 +27,10 @@ pub enum AstStmt {
 
 #[derive(Debug, PartialEq)]
 pub enum AstExpr {
+    Call {
+        id: Box<AstExpr>,
+        args: Vec<AstExpr>,
+    },
     Assignment {
         id: String,
         expr: Box<AstExpr>,
@@ -82,6 +86,13 @@ impl Display for Ast {
 impl Display for AstExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            AstExpr::Call { id, args } => {
+                let args_str = args.iter()
+                    .map(|arg| arg.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{id}([{args_str}])")
+            }
             AstExpr::Assignment { id, expr } => write!(f, "{id} = {expr}"),
             AstExpr::Logical { op, left, right } => {
                 write!(f, "({} {left} {right})", print_ast_token(op))

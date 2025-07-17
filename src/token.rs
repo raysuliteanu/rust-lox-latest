@@ -182,7 +182,7 @@ impl Lexeme {
             Lexeme::Eof => "eof",
             // Variable lexemes don't have constant representations
             Lexeme::Number(_, _) | Lexeme::Identifier(_) | Lexeme::String(_) => {
-                panic!("Variable lexemes don't have constant string representations")
+                panic!("{self} doesn't have a constant repr")
             }
         }
     }
@@ -859,3 +859,5 @@ mod tests {
         assert!(!one_of('a', ""));
     }
 }
+
+// Note: From implementations are not needed since thiserror already provides them

@@ -106,19 +106,34 @@ pub fn print_ast(ast: &[Ast]) {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum ParseError {
-    #[error("missing token '{}' got '{}'", expected, actual)]
+    #[error("missing token '{}' got '{}'", expected.lexeme_str(), actual.lexeme_str())]
     MissingToken { expected: Lexeme, actual: Lexeme },
-
-    #[error("unexpected token '{actual}'")]
+    #[error("unexpected token '{}'", actual.lexeme.lexeme_str())]
     UnexpectedToken { actual: Token },
-
     #[error("Unexpected EOF")]
     UnexpectedEof,
 }
 
+#[derive(Error, Debug)]
+#[error("[line {}] Error at '{}' Expect expression.\n{source}", token.span.line(), token.lexeme.lexeme_str())]
+pub struct ExpectedExpressionError {
+    token: Token,
+    source: ParseError,
+}
+
 pub type ParseResult<T> = Result<T>;
+
+macro_rules! expression_expected {
+    ($t: expr, $s: expr) => {{
+        crate::parser::ExpectedExpressionError {
+            token: $t,
+            source: $s,
+        }
+        .into()
+    }};
+}
 
 macro_rules! ast_missing_token {
     ($e: expr, $a: expr) => {
@@ -410,15 +425,25 @@ impl<'parser> Parser<'parser> {
                 }
                 // var decl initializer
                 // e.g. for (var init; cond; incr)
-                Some(t) if t.lexeme == lexeme_from("var") => {
-                    let var = self.var_decl(tokens)?;
-                    trace!("for_stmt: init: {var}");
-                    Some(var)
+                Some(token) if token.lexeme == lexeme_from("var") => {
+                    let t = (*token).clone();
+                    let expr = self.var_decl(tokens).map_err(|e| -> anyhow::Error {
+                        let pe = e.downcast_ref::<ParseError>().unwrap();
+                        expression_expected!(t, pe.clone())
+                    })?;
+
+                    Some(expr)
                 }
                 // expr initializer
                 // e.g. var a; for (a = 1; cond; incr)
-                Some(_) => {
-                    let expr = self.expression_statement(tokens)?;
+                Some(token) => {
+                    let t = (*token).clone();
+                    let expr = self
+                        .expression_statement(tokens)
+                        .map_err(|e| -> anyhow::Error {
+                            let pe = e.downcast_ref::<ParseError>().unwrap();
+                            expression_expected!(t, pe.clone())
+                        })?;
                     trace!("for_stmt: init: {expr}");
                     Some(expr)
                 }
@@ -436,7 +461,12 @@ impl<'parser> Parser<'parser> {
                 })
             } else {
                 // for (_ ; cond ; _)
-                let expr = self.expression(tokens)?;
+                let t = (*tokens.peek().unwrap()).clone();
+                let expr = self.expression(tokens).map_err(|e| -> anyhow::Error {
+                    let pe = e.downcast_ref::<ParseError>().unwrap();
+                    expression_expected!(t, pe.clone())
+                })?;
+
                 // must be semicolon after cond
                 let _semicolon = tokens.next();
                 assert_eq!(_semicolon.expect(";").lexeme, lexeme_from(";"));
@@ -451,7 +481,12 @@ impl<'parser> Parser<'parser> {
                 None
             } else {
                 // for (_ ; _ ; incr)
-                let expr = self.expression(tokens)?;
+                let t = (*tokens.peek().unwrap()).clone();
+                let expr = self.expression(tokens).map_err(|e| -> anyhow::Error {
+                    let pe = e.downcast_ref::<ParseError>().unwrap();
+                    expression_expected!(t, pe.clone())
+                })?;
+
                 let _closing_paren = tokens.next();
                 assert_eq!(_closing_paren.expect(";").lexeme, lexeme_from(")"));
                 trace!("for_stmt: incr: {expr}");
@@ -746,11 +781,10 @@ impl<'parser> Parser<'parser> {
                 Ok(ast_group!(expr))
             } else if tokens.peek().is_some() {
                 // something other than a closing ')'
-                Err(ParseError::MissingToken {
-                    expected: lexeme_from(")"),
-                    actual: tokens.next().unwrap().lexeme.clone(),
-                }
-                .into())
+                Err(ast_missing_token!(
+                    lexeme_from(")"),
+                    tokens.next().unwrap().lexeme.clone()
+                ))
             } else {
                 Err(ParseError::UnexpectedEof.into())
             }

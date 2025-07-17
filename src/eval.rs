@@ -29,12 +29,16 @@ impl Display for EvalValue {
 
 #[derive(Error, Debug)]
 pub enum EvalErrors {
-    #[error("invalid op {} for {}", <&Lexeme as Into<String>>::into(op), val)]
-    InvalidUnaryOp { op: Lexeme, val: EvalValue },
-    #[error("invalid operation {} {}", op, <&Lexeme as Into<String>>::into(op))]
-    InvalidBinaryOp { op: Lexeme },
-    #[error("Operands must be two numbers or two strings.")]
-    StringsOrNumbers,
+    #[error("invalid op {} for {}\n[line {line}]", <&Lexeme as Into<String>>::into(op), val)]
+    InvalidUnaryOp {
+        op: Lexeme,
+        val: EvalValue,
+        line: usize,
+    },
+    #[error("invalid operation {op} {}\n[line {line}]", <&Lexeme as Into<String>>::into(op))]
+    InvalidBinaryOp { op: Lexeme, line: usize },
+    #[error("Operands must be two numbers or two strings.\n[line {0}]")]
+    StringsOrNumbers(usize),
     #[error("Undefined variable '{0}'.\n[line {1}]")]
     UndefinedVar(String, usize),
 }
@@ -44,6 +48,7 @@ macro_rules! invalid_unary_op {
         EvalErrors::InvalidUnaryOp {
             op: $token.lexeme.clone(),
             val: $val,
+            line: $token.span.line(),
         }
         .into()
     };
@@ -53,6 +58,7 @@ macro_rules! invalid_binary_op {
     ($token: expr) => {
         EvalErrors::InvalidBinaryOp {
             op: $token.lexeme.clone(),
+            line: $token.span.line(),
         }
         .into()
     };
@@ -287,7 +293,7 @@ impl<'eval> Eval<'_> {
                         EvalValue::String(l.to_string() + &r)
                     }
                 */
-                _ => return Err(EvalErrors::StringsOrNumbers.into()),
+                _ => return Err(EvalErrors::StringsOrNumbers(op.span.line()).into()),
             },
             Lexeme::Minus => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l - r),
@@ -824,16 +830,17 @@ mod tests {
         let error1 = EvalErrors::InvalidUnaryOp {
             op: Lexeme::Bang,
             val: EvalValue::String("test".to_string()),
+            line: 1,
         };
-        assert_eq!(format!("{error1}"), "invalid op ! for test");
+        assert_eq!(format!("{error1}"), "invalid op ! for test\n[line 1]");
 
-        let error2 = EvalErrors::InvalidBinaryOp { op: Lexeme::Plus };
-        assert_eq!(format!("{error2}"), "invalid operation PLUS +");
+        let error2 = EvalErrors::InvalidBinaryOp { op: Lexeme::Plus, line: 2 };
+        assert_eq!(format!("{error2}"), "invalid operation PLUS +\n[line 2]");
 
-        let error3 = EvalErrors::StringsOrNumbers;
+        let error3 = EvalErrors::StringsOrNumbers(3);
         assert_eq!(
             format!("{error3}"),
-            "Operands must be two numbers or two strings."
+            "Operands must be two numbers or two strings.\n[line 3]"
         );
     }
 

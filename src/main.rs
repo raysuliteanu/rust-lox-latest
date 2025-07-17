@@ -8,7 +8,11 @@ use std::{
     process::ExitCode,
 };
 
-use crate::{eval::EvalValue, parser::ParseError, token::Scanner};
+use crate::{
+    eval::EvalValue,
+    parser::{ExpectedExpressionError, ParseError},
+    token::Scanner,
+};
 
 mod eval;
 mod model;
@@ -103,7 +107,9 @@ fn main() -> Result<ExitCode> {
 }
 
 fn map_eval_error(e: anyhow::Error) -> u8 {
-    if e.downcast_ref::<ParseError>().is_some() {
+    if e.downcast_ref::<ParseError>().is_some()
+        || e.downcast_ref::<ExpectedExpressionError>().is_some()
+    {
         65
     } else {
         70

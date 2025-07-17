@@ -78,14 +78,7 @@ fn main() -> Result<ExitCode> {
             let source = get_source(filename)?;
             match eval::Eval::new(&source, !no_expression_mode).evaluate() {
                 Ok(r) => println!("{r}"),
-                Err(e) => {
-                    eprintln!("{e}");
-                    rc = if e.downcast_ref::<ParseError>().is_some() {
-                        65
-                    } else {
-                        70
-                    };
-                }
+                Err(e) => rc = map_eval_error(e),
             }
         }
 
@@ -98,14 +91,7 @@ fn main() -> Result<ExitCode> {
                             println!("{r}");
                         }
                     }
-                    Err(e) => {
-                        eprintln!("{e}");
-                        rc = if e.downcast_ref::<ParseError>().is_some() {
-                            65
-                        } else {
-                            70
-                        };
-                    }
+                    Err(e) => rc = map_eval_error(e),
                 }
             } else {
                 repl()?;
@@ -114,6 +100,14 @@ fn main() -> Result<ExitCode> {
     };
 
     Ok(ExitCode::from(rc))
+}
+
+fn map_eval_error(e: anyhow::Error) -> u8 {
+    if e.downcast_ref::<ParseError>().is_some() {
+        65
+    } else {
+        70
+    }
 }
 
 pub fn repl() -> anyhow::Result<()> {

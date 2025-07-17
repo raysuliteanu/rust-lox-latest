@@ -61,10 +61,9 @@ impl Display for Token {
             | Lexeme::Less
             | Lexeme::Greater
             | Lexeme::Slash => write!(f, "{lexeme} {} null", lexeme.lexeme_str()),
-            Lexeme::EqEq
-            | Lexeme::BangEq
-            | Lexeme::LessEq
-            | Lexeme::GreaterEq => write!(f, "{lexeme} {} null", lexeme.lexeme_str()),
+            Lexeme::EqEq | Lexeme::BangEq | Lexeme::LessEq | Lexeme::GreaterEq => {
+                write!(f, "{lexeme} {} null", lexeme.lexeme_str())
+            }
             Lexeme::True
             | Lexeme::False
             | Lexeme::Nil
@@ -182,8 +181,9 @@ impl Lexeme {
             Lexeme::Print => "print",
             Lexeme::Eof => "eof",
             // Variable lexemes don't have constant representations
-            Lexeme::Number(_, _) | Lexeme::Identifier(_) | Lexeme::String(_) => 
-                panic!("Variable lexemes don't have constant string representations"),
+            Lexeme::Number(_, _) | Lexeme::Identifier(_) | Lexeme::String(_) => {
+                panic!("Variable lexemes don't have constant string representations")
+            }
         }
     }
 
@@ -846,14 +846,8 @@ mod tests {
 
     #[test]
     fn test_keyword_token_helper() {
-        assert_eq!(
-            keyword_token("true"),
-            Some(Lexeme::True)
-        );
-        assert_eq!(
-            keyword_token("false"),
-            Some(Lexeme::False)
-        );
+        assert_eq!(keyword_token("true"), Some(Lexeme::True));
+        assert_eq!(keyword_token("false"), Some(Lexeme::False));
         assert_eq!(keyword_token("identifier"), None);
     }
 

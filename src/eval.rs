@@ -39,6 +39,25 @@ pub enum EvalErrors {
     UndefinedVar(String, usize),
 }
 
+macro_rules! invalid_unary_op {
+    ($token: expr, $val: expr) => {
+        EvalErrors::InvalidUnaryOp {
+            op: $token.lexeme.clone(),
+            val: $val,
+        }
+        .into()
+    };
+}
+
+macro_rules! invalid_binary_op {
+    ($token: expr) => {
+        EvalErrors::InvalidBinaryOp {
+            op: $token.lexeme.clone(),
+        }
+        .into()
+    };
+}
+
 pub type EvalResult = Result<EvalValue>;
 
 #[derive(Default)]
@@ -147,7 +166,13 @@ impl<'eval> Eval<'_> {
         let parser = Parser::new(self.source, self.expression_mode, false);
         let tree = parser.parse()?;
 
-        self.eval(tree.iter())
+        match self.eval(tree.iter()) {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                eprintln!("{e}");
+                Err(e)
+            }
+        }
     }
 
     fn eval(&mut self, tree: std::slice::Iter<'_, Ast>) -> EvalResult {
@@ -234,31 +259,13 @@ impl<'eval> Eval<'_> {
                 EvalValue::Number(_) => EvalValue::Boolean(false),
                 EvalValue::Boolean(v) => EvalValue::Boolean(!v),
                 EvalValue::Nil => EvalValue::Boolean(true),
-                _ => {
-                    return Err(EvalErrors::InvalidUnaryOp {
-                        op: op.lexeme.clone(),
-                        val,
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_unary_op!(op, val)),
             },
             Lexeme::Minus => match val {
                 EvalValue::Number(v) => EvalValue::Number(-v),
-                _ => {
-                    return Err(EvalErrors::InvalidUnaryOp {
-                        op: op.lexeme.clone(),
-                        val,
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_unary_op!(op, val)),
             },
-            _ => {
-                return Err(EvalErrors::InvalidUnaryOp {
-                    op: op.lexeme.clone(),
-                    val,
-                }
-                .into());
-            }
+            _ => return Err(invalid_unary_op!(op, val)),
         };
 
         Ok(result)
@@ -272,34 +279,27 @@ impl<'eval> Eval<'_> {
             Lexeme::Plus => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l + r),
                 (EvalValue::String(l), EvalValue::String(r)) => EvalValue::String(l + &r),
+                /* TODO: I think this should be valid but not for CC
+                    (EvalValue::String(l), EvalValue::Number(r)) => {
+                        EvalValue::String(l + &r.to_string())
+                    }
+                    (EvalValue::Number(l), EvalValue::String(r)) => {
+                        EvalValue::String(l.to_string() + &r)
+                    }
+                */
                 _ => return Err(EvalErrors::StringsOrNumbers.into()),
             },
             Lexeme::Minus => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l - r),
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::Star => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l * r),
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::Slash => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l / r),
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::EqEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l == r),
@@ -315,47 +315,21 @@ impl<'eval> Eval<'_> {
             },
             Lexeme::Less => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l < r),
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::LessEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l <= r),
-
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::Greater => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l > r),
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::GreaterEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l >= r),
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
-            _ => {
-                return Err(EvalErrors::InvalidBinaryOp {
-                    op: op.lexeme.clone(),
-                }
-                .into());
-            }
+            _ => return Err(invalid_binary_op!(op)),
         };
 
         Ok(result)
@@ -509,6 +483,7 @@ impl<'eval> Eval<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::print_ast;
     use crate::span::Span;
 
     #[test]
@@ -953,7 +928,6 @@ mod tests {
             lexeme: Lexeme::Plus,
             span: Span::new(0, 0, 1),
         };
-
         let number_expr = AstExpr::Terminal(Token {
             lexeme: Lexeme::Number("42".to_string(), 42.0),
             span: Span::new(0, 0, 1),

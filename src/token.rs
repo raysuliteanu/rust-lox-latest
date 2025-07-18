@@ -47,46 +47,46 @@ impl<'scanner> Scanner<'scanner> {
                         continue;
                     }
                     c if c.is_whitespace() => continue,
-                    '(' => tokens.push(Token::new(lexeme_from("("), (line, i, 1).into())),
-                    ')' => tokens.push(Token::new(lexeme_from(")"), (line, i, 1).into())),
-                    '{' => tokens.push(Token::new(lexeme_from("{"), (line, i, 1).into())),
-                    '}' => tokens.push(Token::new(lexeme_from("}"), (line, i, 1).into())),
-                    ',' => tokens.push(Token::new(lexeme_from(","), (line, i, 1).into())),
-                    '.' => tokens.push(Token::new(lexeme_from("."), (line, i, 1).into())),
-                    '+' => tokens.push(Token::new(lexeme_from("+"), (line, i, 1).into())),
-                    '-' => tokens.push(Token::new(lexeme_from("-"), (line, i, 1).into())),
-                    ';' => tokens.push(Token::new(lexeme_from(";"), (line, i, 1).into())),
-                    '*' => tokens.push(Token::new(lexeme_from("*"), (line, i, 1).into())),
+                    '(' => tokens.push(Token::new(Lexeme::LeftParen, (line, i, 1).into())),
+                    ')' => tokens.push(Token::new(Lexeme::RightParen, (line, i, 1).into())),
+                    '{' => tokens.push(Token::new(Lexeme::LeftBrace, (line, i, 1).into())),
+                    '}' => tokens.push(Token::new(Lexeme::RightBrace, (line, i, 1).into())),
+                    ',' => tokens.push(Token::new(Lexeme::Comma, (line, i, 1).into())),
+                    '.' => tokens.push(Token::new(Lexeme::Dot, (line, i, 1).into())),
+                    '+' => tokens.push(Token::new(Lexeme::Plus, (line, i, 1).into())),
+                    '-' => tokens.push(Token::new(Lexeme::Minus, (line, i, 1).into())),
+                    ';' => tokens.push(Token::new(Lexeme::SemiColon, (line, i, 1).into())),
+                    '*' => tokens.push(Token::new(Lexeme::Star, (line, i, 1).into())),
                     '=' => {
                         if peekable_iter.peek().is_some_and(|(_, l)| *l == '=') {
                             peekable_iter.next();
-                            tokens.push(Token::new(lexeme_from("=="), (line, i, 2).into()))
+                            tokens.push(Token::new(Lexeme::EqEq, (line, i, 2).into()))
                         } else {
-                            tokens.push(Token::new(lexeme_from("="), (line, i, 1).into()))
+                            tokens.push(Token::new(Lexeme::Eq, (line, i, 1).into()))
                         }
                     }
                     '<' => {
                         if peekable_iter.peek().is_some_and(|(_, l)| *l == '=') {
                             peekable_iter.next();
-                            tokens.push(Token::new(lexeme_from("<="), (line, i, 2).into()))
+                            tokens.push(Token::new(Lexeme::LessEq, (line, i, 2).into()))
                         } else {
-                            tokens.push(Token::new(lexeme_from("<"), (line, i, 1).into()))
+                            tokens.push(Token::new(Lexeme::Less, (line, i, 1).into()))
                         }
                     }
                     '>' => {
                         if peekable_iter.peek().is_some_and(|(_, l)| *l == '=') {
                             peekable_iter.next();
-                            tokens.push(Token::new(lexeme_from(">="), (line, i, 2).into()))
+                            tokens.push(Token::new(Lexeme::GreaterEq, (line, i, 2).into()))
                         } else {
-                            tokens.push(Token::new(lexeme_from(">"), (line, i, 1).into()))
+                            tokens.push(Token::new(Lexeme::Greater, (line, i, 1).into()))
                         }
                     }
                     '!' => {
                         if peekable_iter.peek().is_some_and(|(_, l)| *l == '=') {
                             peekable_iter.next();
-                            tokens.push(Token::new(lexeme_from("!="), (line, i, 2).into()))
+                            tokens.push(Token::new(Lexeme::BangEq, (line, i, 2).into()))
                         } else {
-                            tokens.push(Token::new(lexeme_from("!"), (line, i, 1).into()))
+                            tokens.push(Token::new(Lexeme::Bang, (line, i, 1).into()))
                         }
                     }
                     '\"' => {
@@ -205,7 +205,7 @@ impl<'scanner> Scanner<'scanner> {
                                 peekable_iter.next();
                             }
                         } else {
-                            tokens.push(Token::new(lexeme_from("/"), (line, i, 1).into()))
+                            tokens.push(Token::new(Lexeme::Slash, (line, i, 1).into()))
                         }
                     }
                     _ => {
@@ -224,7 +224,7 @@ impl<'scanner> Scanner<'scanner> {
         }
 
         tokens.push(Token::new(
-            lexeme_from("eof"),
+            Lexeme::Eof,
             Span::new(line, self.source.len(), 0),
         ));
 
@@ -236,14 +236,10 @@ impl<'scanner> Scanner<'scanner> {
     }
 }
 
-pub fn lexeme_from(s: &str) -> Lexeme {
-    s.into()
-}
-
 fn keyword_token(s: &str) -> Option<Lexeme> {
     match s {
         "true" | "false" | "nil" | "and" | "or" | "class" | "for" | "fun" | "if" | "else"
-        | "return" | "super" | "this" | "var" | "while" | "print" => Some(lexeme_from(s)),
+        | "return" | "super" | "this" | "var" | "while" | "print" => Some(s.into()),
         _ => None,
     }
 }
@@ -561,8 +557,8 @@ mod tests {
 
     #[test]
     fn test_lexeme_from_helper() {
-        assert_eq!(lexeme_from("("), Lexeme::LeftParen);
-        assert_eq!(lexeme_from("true"), Lexeme::True);
+        assert_eq!(Lexeme::from("("), Lexeme::LeftParen);
+        assert_eq!(Lexeme::from("true"), Lexeme::True);
     }
 
     #[test]

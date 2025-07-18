@@ -5,7 +5,7 @@ use log::trace;
 use thiserror::Error;
 
 use crate::model::{Ast, AstExpr, AstStmt, Lexeme, Token};
-use crate::token::{Scanner, lexeme_from};
+use crate::token::Scanner;
 
 type PeekableTokenIter<'a> = Peekable<std::slice::Iter<'a, Token>>;
 
@@ -198,7 +198,7 @@ impl<'parser> Parser<'parser> {
         let mut ast: Vec<Ast> = Vec::new();
 
         while let Some(token) = tokens.peek()
-            && token.lexeme != lexeme_from("eof")
+            && token.lexeme != Lexeme::Eof
         {
             let statement = self.declaration(tokens)?;
             ast.push(statement);
@@ -244,29 +244,29 @@ impl<'parser> Parser<'parser> {
 
         // eat 'var' token
         let var_token = tokens.next().unwrap();
-        assert_eq!(var_token.lexeme, lexeme_from("var"));
+        assert_eq!(var_token.lexeme, Lexeme::Var);
 
         match tokens.peek() {
             Some(t) => match &t.lexeme {
                 Lexeme::Identifier(_) => {
                     trace!("found identifier: {t}");
                     let identifier_token = tokens.next().unwrap().clone();
-                    let expr = if let Some(_e) = tokens.next_if(|t| t.lexeme == lexeme_from("=")) {
+                    let expr = if let Some(_e) = tokens.next_if(|t| t.lexeme == Lexeme::Eq) {
                         let expr = self.expression(tokens)?;
                         Some(Box::new(expr))
                     } else {
                         None
                     };
 
-                    if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
+                    if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
                         Ok(Ast::Variable(identifier_token, expr))
                     } else if tokens.peek().is_some() {
-                        ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
+                        ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
                     } else {
                         Err(ParseError::UnexpectedEof)
                     }
                 }
-                _ => ast_expected_token!(t, lexeme_from("identifier")),
+                _ => ast_expected_token!(t, Lexeme::from("identifier")),
             },
             _ => Err(ParseError::UnexpectedEof),
         }
@@ -295,17 +295,17 @@ impl<'parser> Parser<'parser> {
 
     fn parse_block(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         let left_brace_token = tokens.next().unwrap();
-        assert_eq!(left_brace_token.lexeme, lexeme_from("{"));
+        assert_eq!(left_brace_token.lexeme, Lexeme::LeftBrace);
         trace!("block start");
 
         let mut stmts = vec![];
-        while tokens.peek().is_some_and(|t| t.lexeme != lexeme_from("}")) {
+        while tokens.peek().is_some_and(|t| t.lexeme != Lexeme::RightBrace) {
             let stmt = self.declaration(tokens)?;
             stmts.push(stmt);
         }
 
         let right_brace_token = tokens.next().unwrap();
-        assert_eq!(right_brace_token.lexeme, lexeme_from("}"));
+        assert_eq!(right_brace_token.lexeme, Lexeme::RightBrace);
         trace!("block end");
 
         Ok(Ast::Block(stmts))
@@ -319,23 +319,23 @@ impl<'parser> Parser<'parser> {
         trace!("for_stmt");
 
         let for_token = tokens.next().unwrap();
-        assert_eq!(for_token.lexeme, lexeme_from("for"));
+        assert_eq!(for_token.lexeme, Lexeme::For);
 
-        if tokens.next_if(|t| t.lexeme == lexeme_from("(")).is_some() {
+        if tokens.next_if(|t| t.lexeme == Lexeme::LeftParen).is_some() {
             // handle initializer, if any
             let init_expr = match tokens.peek().cloned() {
                 // no initializer
                 // e.g. for ( ; cond; incr)
-                Some(t) if t.lexeme == lexeme_from(";") => {
+                Some(t) if t.lexeme == Lexeme::SemiColon => {
                     trace!("for_stmt: no initializer");
                     let for_token = tokens.next().unwrap();
-                    assert_eq!(for_token.lexeme, lexeme_from(";"));
+                    assert_eq!(for_token.lexeme, Lexeme::SemiColon);
 
                     None
                 }
                 // var decl initializer
                 // e.g. for (var init; cond; incr)
-                Some(token) if token.lexeme == lexeme_from("var") => match self.var_decl(tokens) {
+                Some(token) if token.lexeme == Lexeme::Var => match self.var_decl(tokens) {
                     Ok(expr) => Some(expr),
                     Err(e) => return Err(expression_expected!(token.clone(), e)),
                 },
@@ -352,12 +352,12 @@ impl<'parser> Parser<'parser> {
                 None => return Err(ParseError::UnexpectedEof),
             };
 
-            let semicolon = tokens.next_if(|t| t.lexeme == lexeme_from(";"));
+            let semicolon = tokens.next_if(|t| t.lexeme == Lexeme::SemiColon);
             let cond_expr = if semicolon.is_some() {
                 // for (init ; ; incr)
                 trace!("for_stmt: no cond");
                 ast_terminal!(Token {
-                    lexeme: lexeme_from("true"),
+                    lexeme: Lexeme::True,
                     span: (0, 0, 0).into()
                 })
             } else {
@@ -370,12 +370,12 @@ impl<'parser> Parser<'parser> {
 
                 // must be semicolon after cond
                 let _semicolon = tokens.next();
-                assert_eq!(_semicolon.expect(";").lexeme, lexeme_from(";"));
+                assert_eq!(_semicolon.expect(";").lexeme, Lexeme::SemiColon);
                 trace!("for_stmt: cond: {expr}");
                 expr
             };
 
-            let close_paren = tokens.next_if(|t| t.lexeme == lexeme_from(")"));
+            let close_paren = tokens.next_if(|t| t.lexeme == Lexeme::RightParen);
             let incr_expr = if close_paren.is_some() {
                 // for (init ; cond ; )
                 trace!("for_stmt: no incr expr");
@@ -389,12 +389,12 @@ impl<'parser> Parser<'parser> {
                 };
 
                 let _closing_paren = tokens.next();
-                assert_eq!(_closing_paren.expect(";").lexeme, lexeme_from(")"));
+                assert_eq!(_closing_paren.expect(";").lexeme, Lexeme::RightParen);
                 trace!("for_stmt: incr: {expr}");
                 Some(expr)
             };
 
-            let body = if tokens.peek().is_some_and(|t| t.lexeme == lexeme_from("{")) {
+            let body = if tokens.peek().is_some_and(|t| t.lexeme == Lexeme::LeftBrace) {
                 trace!("for_stmt: body block start");
                 let block = self.parse_block(tokens)?;
                 trace!("for_stmt: body block end");
@@ -439,12 +439,12 @@ impl<'parser> Parser<'parser> {
     fn if_stmt(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         trace!("if_stmt: {:?}", tokens.peek());
         let if_token = tokens.next().unwrap();
-        assert_eq!(if_token.lexeme, lexeme_from("if"));
+        assert_eq!(if_token.lexeme, Lexeme::If);
 
         let cond = self.expression(tokens)?;
         let then_stmt = self.statement(tokens)?;
         let else_stmt = if tokens
-            .next_if(|t| t.lexeme == lexeme_from("else"))
+            .next_if(|t| t.lexeme == Lexeme::Else)
             .is_some()
         {
             Some(Box::new(self.statement(tokens)?))
@@ -462,7 +462,7 @@ impl<'parser> Parser<'parser> {
     fn while_stmt(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
         trace!("while_stmt: {:?}", tokens.peek());
         let while_token = tokens.next().unwrap();
-        assert_eq!(while_token.lexeme, lexeme_from("while"));
+        assert_eq!(while_token.lexeme, Lexeme::While);
 
         let cond = self.expression(tokens)?;
         let body = self.statement(tokens)?;
@@ -477,13 +477,13 @@ impl<'parser> Parser<'parser> {
         trace!("print_stmt: {:?}", tokens.peek());
 
         let print_token = tokens.next().unwrap();
-        assert_eq!(print_token.lexeme, lexeme_from("print"));
+        assert_eq!(print_token.lexeme, Lexeme::Print);
 
         let expr = self.expression(tokens)?;
-        if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
+        if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
             Ok(Ast::Statement(AstStmt::Print(expr)))
         } else if tokens.peek().is_some() {
-            ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
+            ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
         } else {
             Err(ParseError::UnexpectedEof)
         }
@@ -495,7 +495,7 @@ impl<'parser> Parser<'parser> {
         // Consume the 'return' token first
         let return_token = tokens.next().unwrap();
 
-        if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
+        if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
             // a "naked" 'return' without expression i.e. "return;"
             Ok(Ast::Statement(AstStmt::Return(None)))
         } else if tokens.peek().is_some_and(|t| {
@@ -510,15 +510,15 @@ impl<'parser> Parser<'parser> {
             )
         }) {
             let ast = self.expression(tokens)?;
-            if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
+            if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
                 Ok(Ast::Statement(AstStmt::Return(Some(Box::new(ast)))))
             } else if tokens.peek().is_some() {
-                ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
+                ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
             } else {
-                Err(ast_missing_token!(lexeme_from(";"), lexeme_from("eof")))
+                Err(ast_missing_token!(Lexeme::SemiColon, Lexeme::Eof))
             }
         } else {
-            ast_expected_token!(return_token, lexeme_from(";"))
+            ast_expected_token!(return_token, Lexeme::SemiColon)
         }
     }
 
@@ -526,12 +526,12 @@ impl<'parser> Parser<'parser> {
         let token = tokens.peek();
         trace!("expr_stmt: {token:?}");
         let expr = self.expression(tokens)?;
-        if tokens.next_if(|t| t.lexeme == lexeme_from(";")).is_some() {
+        if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
             Ok(Ast::Statement(AstStmt::Expression(expr)))
         } else if tokens.peek().is_some() {
-            ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
+            ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
         } else {
-            Err(ast_missing_token!(lexeme_from(";"), lexeme_from("eof")))
+            Err(ast_missing_token!(Lexeme::SemiColon, Lexeme::Eof))
         }
     }
 
@@ -557,7 +557,7 @@ impl<'parser> Parser<'parser> {
 
         let left = self.logical_or(tokens)?;
         // after parsing tokens, if the next token is '=' then ...
-        if tokens.next_if(|t| t.lexeme == lexeme_from("=")).is_some() {
+        if tokens.next_if(|t| t.lexeme == Lexeme::Eq).is_some() {
             // ... it's an assignment i.e. 'token' is lvalue, so parse rvalue
             trace!("assignment is assignment");
             let rvalue = self.assignment(tokens)?;
@@ -576,7 +576,7 @@ impl<'parser> Parser<'parser> {
     fn logical_or(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
         trace!("logical_or: {:?}", tokens.peek());
         let mut left = self.logical_and(tokens)?;
-        while let Some(t) = tokens.next_if(|t| t.lexeme == lexeme_from("or")) {
+        while let Some(t) = tokens.next_if(|t| t.lexeme == Lexeme::Or) {
             let right = self.logical_and(tokens)?;
             let op = t.clone();
             left = AstExpr::Logical {
@@ -593,7 +593,7 @@ impl<'parser> Parser<'parser> {
     fn logical_and(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
         trace!("logical_and: {:?}", tokens.peek());
         let mut left = self.equality(tokens)?;
-        while let Some(t) = tokens.next_if(|t| t.lexeme == lexeme_from("and")) {
+        while let Some(t) = tokens.next_if(|t| t.lexeme == Lexeme::And) {
             let right = self.equality(tokens)?;
             let op = t.clone();
             left = AstExpr::Logical {
@@ -693,12 +693,12 @@ impl<'parser> Parser<'parser> {
         // foo(a, b, c)
         // foo(a(b, c), d)
         let result = match tokens.peek() {
-            Some(t) if t.lexeme == lexeme_from("(") => {
+            Some(t) if t.lexeme == Lexeme::LeftParen => {
                 trace!("call: args start");
                 let _open_paren = tokens.next();
                 let mut args = vec![];
                 while let Some(t) = tokens.peek().cloned() {
-                    if t.lexeme == lexeme_from(")") {
+                    if t.lexeme == Lexeme::RightParen {
                         let _close_paren = tokens.next();
                         expr = call_expression!(expr, args);
                         trace!("call: args end");
@@ -713,7 +713,7 @@ impl<'parser> Parser<'parser> {
                         return Err(ParseError::TooManyFunctionArgs(t.span.line()));
                     }
 
-                    if tokens.peek().is_some_and(|t| t.lexeme == lexeme_from(",")) {
+                    if tokens.peek().is_some_and(|t| t.lexeme == Lexeme::Comma) {
                         let _comma = tokens.next();
                     }
                 }
@@ -735,14 +735,14 @@ impl<'parser> Parser<'parser> {
             tokens.next_if(|t| matches!(t.lexeme, Lexeme::True | Lexeme::False | Lexeme::Nil))
         {
             Ok(ast_terminal!(token))
-        } else if let Some(_left_paren) = tokens.next_if(|t| t.lexeme == lexeme_from("(")) {
+        } else if let Some(_left_paren) = tokens.next_if(|t| t.lexeme == Lexeme::LeftParen) {
             let expr = self.expression(tokens)?;
-            if let Some(_right_paren) = tokens.next_if(|t| t.lexeme == lexeme_from(")")) {
+            if let Some(_right_paren) = tokens.next_if(|t| t.lexeme == Lexeme::RightParen) {
                 Ok(ast_group!(expr))
             } else if tokens.peek().is_some() {
                 // something other than a closing ')'
                 Err(ast_missing_token!(
-                    lexeme_from(")"),
+                    Lexeme::RightParen,
                     tokens.next().unwrap().lexeme.clone()
                 ))
             } else {
@@ -885,7 +885,7 @@ mod tests {
 
     #[test]
     fn test_ast_display_print_statement() {
-        let expr = AstExpr::Terminal(create_token(lexeme_from("true")));
+        let expr = AstExpr::Terminal(create_token(Lexeme::True));
         let print_stmt = Ast::Statement(AstStmt::Print(expr));
         assert_eq!(print_stmt.to_string(), "print true;");
     }
@@ -905,7 +905,7 @@ mod tests {
 
     #[test]
     fn test_ast_display_group() {
-        let expr = AstExpr::Terminal(create_token(lexeme_from("true")));
+        let expr = AstExpr::Terminal(create_token(Lexeme::True));
         let group = Ast::Expression(AstExpr::Group(Box::new(expr)));
         assert_eq!(group.to_string(), "(group true)");
     }
@@ -914,7 +914,7 @@ mod tests {
     fn test_ast_display_binary_expression() {
         let left = AstExpr::Terminal(create_token(Lexeme::Number("1".to_string(), 1.0)));
         let right = AstExpr::Terminal(create_token(Lexeme::Number("2".to_string(), 2.0)));
-        let op = create_token(lexeme_from("+"));
+        let op = create_token(Lexeme::Plus);
         let binary = AstExpr::Binary {
             op,
             left: Box::new(left),
@@ -926,7 +926,7 @@ mod tests {
     #[test]
     fn test_ast_display_unary_expression() {
         let expr = AstExpr::Terminal(create_token(Lexeme::Number("5".to_string(), 5.0)));
-        let op = create_token(lexeme_from("-"));
+        let op = create_token(Lexeme::Minus);
         let unary = Ast::Expression(AstExpr::Unary {
             op,
             exp: Box::new(expr),
@@ -936,13 +936,13 @@ mod tests {
 
     #[test]
     fn test_ast_display_terminal_literals() {
-        let true_ast = Ast::Expression(AstExpr::Terminal(create_token(lexeme_from("true"))));
+        let true_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::True)));
         assert_eq!(true_ast.to_string(), "true");
 
-        let false_ast = Ast::Expression(AstExpr::Terminal(create_token(lexeme_from("false"))));
+        let false_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::False)));
         assert_eq!(false_ast.to_string(), "false");
 
-        let nil_ast = Ast::Expression(AstExpr::Terminal(create_token(lexeme_from("nil"))));
+        let nil_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Nil)));
         assert_eq!(nil_ast.to_string(), "nil");
 
         let number_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Number(
@@ -1144,7 +1144,7 @@ mod tests {
     fn test_expression_type_display() {
         let left = AstExpr::Terminal(create_token(Lexeme::Number("1".to_string(), 1.0)));
         let right = AstExpr::Terminal(create_token(Lexeme::Number("2".to_string(), 2.0)));
-        let op = create_token(lexeme_from("+"));
+        let op = create_token(Lexeme::Plus);
         let binary = AstExpr::Binary {
             op,
             left: Box::new(left),
@@ -1153,7 +1153,7 @@ mod tests {
         assert_eq!(binary.to_string(), "(+ 1.0 2.0)");
 
         let expr = AstExpr::Terminal(create_token(Lexeme::Number("5".to_string(), 5.0)));
-        let op = create_token(lexeme_from("-"));
+        let op = create_token(Lexeme::Minus);
         let unary = AstExpr::Unary {
             op,
             exp: Box::new(expr),

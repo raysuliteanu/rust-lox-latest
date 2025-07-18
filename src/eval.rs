@@ -5,8 +5,8 @@ use std::fmt::Display;
 use thiserror::Error;
 
 use crate::model::{Ast, AstExpr, AstStmt};
+use crate::model::{Lexeme, Token};
 use crate::parser::Parser;
-use crate::token::{Lexeme, Token};
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum EvalValue {
@@ -29,17 +29,40 @@ impl Display for EvalValue {
 
 #[derive(Error, Debug)]
 pub enum EvalErrors {
-    #[error("invalid op {} for {}", <&Lexeme as Into<String>>::into(op), val)]
-    InvalidUnaryOp { op: Lexeme, val: EvalValue },
-    #[error("invalid operation {} {}", op, <&Lexeme as Into<String>>::into(op))]
-    InvalidBinaryOp { op: Lexeme },
-    #[error("Operands must be two numbers or two strings.")]
-    StringsOrNumbers,
+    #[error("invalid op {} for {}\n[line {line}]", <&Lexeme as Into<String>>::into(op), val)]
+    InvalidUnaryOp {
+        op: Lexeme,
+        val: EvalValue,
+        line: usize,
+    },
+    #[error("invalid operation {op} {}\n[line {line}]", <&Lexeme as Into<String>>::into(op))]
+    InvalidBinaryOp { op: Lexeme, line: usize },
+    #[error("Operands must be two numbers or two strings.\n[line {0}]")]
+    StringsOrNumbers(usize),
     #[error("Undefined variable '{0}'.\n[line {1}]")]
     UndefinedVar(String, usize),
 }
 
-pub type EvalResult = Result<EvalValue>;
+macro_rules! invalid_unary_op {
+    ($token: expr, $val: expr) => {
+        EvalErrors::InvalidUnaryOp {
+            op: $token.lexeme.clone(),
+            val: $val,
+            line: $token.span.line(),
+        }
+    };
+}
+
+macro_rules! invalid_binary_op {
+    ($token: expr) => {
+        EvalErrors::InvalidBinaryOp {
+            op: $token.lexeme.clone(),
+            line: $token.span.line(),
+        }
+    };
+}
+
+pub type EvalResult<T> = Result<T, EvalErrors>;
 
 #[derive(Default)]
 struct EvalEnv {
@@ -143,14 +166,20 @@ impl<'eval> Eval<'_> {
         }
     }
 
-    pub fn evaluate(&mut self) -> EvalResult {
+    pub fn evaluate(&mut self) -> anyhow::Result<EvalValue> {
         let parser = Parser::new(self.source, self.expression_mode, false);
         let tree = parser.parse()?;
 
-        self.eval(tree.iter())
+        match self.eval(tree.iter()) {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                eprintln!("{e}");
+                Err(e.into())
+            }
+        }
     }
 
-    fn eval(&mut self, tree: std::slice::Iter<'_, Ast>) -> EvalResult {
+    fn eval(&mut self, tree: std::slice::Iter<'_, Ast>) -> EvalResult<EvalValue> {
         let mut value = EvalValue::Nil;
         for ast in tree {
             value = self.eval_ast(ast)?;
@@ -160,7 +189,7 @@ impl<'eval> Eval<'_> {
         Ok(value)
     }
 
-    fn eval_ast(&mut self, ast: &'eval Ast) -> EvalResult {
+    fn eval_ast(&mut self, ast: &'eval Ast) -> EvalResult<EvalValue> {
         trace!("eval_ast");
         match ast {
             Ast::Class => todo!("class decl"),
@@ -172,21 +201,20 @@ impl<'eval> Eval<'_> {
         }
     }
 
-    fn eval_stmt(&mut self, stmt: &'eval AstStmt) -> EvalResult {
+    fn eval_stmt(&mut self, stmt: &'eval AstStmt) -> EvalResult<EvalValue> {
         trace!("eval_stmt");
         match stmt {
             AstStmt::Expression(expr) => self.eval_expr(expr),
             AstStmt::Print(ast) => self.eval_print_stmt(ast),
-            AstStmt::For => todo!("for stmts"),
             AstStmt::If(cond, then_block, else_block) => {
                 self.eval_if_stmt(cond, then_block, else_block)
             }
             AstStmt::Return(_ast) => todo!("return stmts"),
-            AstStmt::While(_ast, _ast1) => todo!("while stmts"),
+            AstStmt::While(cond, body) => self.eval_while(cond, body),
         }
     }
 
-    fn eval_expr(&mut self, expr: &'eval AstExpr) -> EvalResult {
+    fn eval_expr(&mut self, expr: &'eval AstExpr) -> EvalResult<EvalValue> {
         trace!("eval_expr");
         match expr {
             AstExpr::Terminal(token) => self.eval_terminal(token),
@@ -194,11 +222,12 @@ impl<'eval> Eval<'_> {
             AstExpr::Unary { op, exp } => self.eval_unary(op, exp),
             AstExpr::Binary { op, left, right } => self.eval_binary(op, left, right),
             AstExpr::Assignment { id, expr } => self.eval_assignment(id, expr),
+            AstExpr::Call { id: _, args: _ } => todo!("call"),
             AstExpr::Logical { op, left, right } => self.eval_logical(op, left, right),
         }
     }
 
-    fn eval_print_stmt(&mut self, expr: &'eval AstExpr) -> EvalResult {
+    fn eval_print_stmt(&mut self, expr: &'eval AstExpr) -> EvalResult<EvalValue> {
         trace!("eval_print");
         let val = self.eval_expr(expr)?;
         trace!("print = {val}");
@@ -206,7 +235,7 @@ impl<'eval> Eval<'_> {
         Ok(EvalValue::Nil)
     }
 
-    fn eval_terminal(&self, token: &'eval Token) -> EvalResult {
+    fn eval_terminal(&self, token: &'eval Token) -> EvalResult<EvalValue> {
         trace!("eval_terminal");
         let val = match &token.lexeme {
             Lexeme::Number(_, v) => EvalValue::Number(*v),
@@ -215,7 +244,7 @@ impl<'eval> Eval<'_> {
                 if let Some(value) = self.eval_identifier(id) {
                     value.clone()
                 } else {
-                    return Err(EvalErrors::UndefinedVar(id.clone(), token.span.line()).into());
+                    return Err(EvalErrors::UndefinedVar(id.clone(), token.span.line()));
                 }
             }
             Lexeme::True => EvalValue::Boolean(true),
@@ -227,7 +256,7 @@ impl<'eval> Eval<'_> {
         Ok(val)
     }
 
-    fn eval_unary(&mut self, op: &Token, expr: &AstExpr) -> EvalResult {
+    fn eval_unary(&mut self, op: &Token, expr: &AstExpr) -> EvalResult<EvalValue> {
         trace!("eval_unary");
         let val = self.eval_expr(expr)?;
         let result = match op.lexeme {
@@ -235,37 +264,24 @@ impl<'eval> Eval<'_> {
                 EvalValue::Number(_) => EvalValue::Boolean(false),
                 EvalValue::Boolean(v) => EvalValue::Boolean(!v),
                 EvalValue::Nil => EvalValue::Boolean(true),
-                _ => {
-                    return Err(EvalErrors::InvalidUnaryOp {
-                        op: op.lexeme.clone(),
-                        val,
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_unary_op!(op, val)),
             },
             Lexeme::Minus => match val {
                 EvalValue::Number(v) => EvalValue::Number(-v),
-                _ => {
-                    return Err(EvalErrors::InvalidUnaryOp {
-                        op: op.lexeme.clone(),
-                        val,
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_unary_op!(op, val)),
             },
-            _ => {
-                return Err(EvalErrors::InvalidUnaryOp {
-                    op: op.lexeme.clone(),
-                    val,
-                }
-                .into());
-            }
+            _ => return Err(invalid_unary_op!(op, val)),
         };
 
         Ok(result)
     }
 
-    fn eval_binary(&mut self, op: &Token, left: &AstExpr, right: &AstExpr) -> EvalResult {
+    fn eval_binary(
+        &mut self,
+        op: &Token,
+        left: &AstExpr,
+        right: &AstExpr,
+    ) -> EvalResult<EvalValue> {
         trace!("eval_binary");
         let left_expr = self.eval_expr(left)?;
         let right_expr = self.eval_expr(right)?;
@@ -273,34 +289,27 @@ impl<'eval> Eval<'_> {
             Lexeme::Plus => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l + r),
                 (EvalValue::String(l), EvalValue::String(r)) => EvalValue::String(l + &r),
-                _ => return Err(EvalErrors::StringsOrNumbers.into()),
+                /* TODO: I think this should be valid but not for CC
+                    (EvalValue::String(l), EvalValue::Number(r)) => {
+                        EvalValue::String(l + &r.to_string())
+                    }
+                    (EvalValue::Number(l), EvalValue::String(r)) => {
+                        EvalValue::String(l.to_string() + &r)
+                    }
+                */
+                _ => return Err(EvalErrors::StringsOrNumbers(op.span.line())),
             },
             Lexeme::Minus => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l - r),
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::Star => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l * r),
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::Slash => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l / r),
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::EqEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l == r),
@@ -316,54 +325,32 @@ impl<'eval> Eval<'_> {
             },
             Lexeme::Less => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l < r),
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::LessEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l <= r),
-
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::Greater => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l > r),
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::GreaterEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l >= r),
-                _ => {
-                    return Err(EvalErrors::InvalidBinaryOp {
-                        op: op.lexeme.clone(),
-                    }
-                    .into());
-                }
+                _ => return Err(invalid_binary_op!(op)),
             },
-            _ => {
-                return Err(EvalErrors::InvalidBinaryOp {
-                    op: op.lexeme.clone(),
-                }
-                .into());
-            }
+            _ => return Err(invalid_binary_op!(op)),
         };
 
         Ok(result)
     }
 
     // var some_var [= expr] ;
-    fn eval_var_decl(&mut self, token: &Token, ast: &Option<Box<AstExpr>>) -> EvalResult {
+    fn eval_var_decl(
+        &mut self,
+        token: &Token,
+        ast: &Option<Box<AstExpr>>,
+    ) -> EvalResult<EvalValue> {
         let initializer = if let Some(expr) = ast {
             Some(self.eval_expr(expr)?)
         } else {
@@ -384,9 +371,9 @@ impl<'eval> Eval<'_> {
     }
 
     // some_var = expr
-    fn eval_assignment(&mut self, id: &str, expr: &AstExpr) -> EvalResult {
+    fn eval_assignment(&mut self, id: &str, expr: &AstExpr) -> EvalResult<EvalValue> {
         if !self.state.var_exists(id) {
-            Err(EvalErrors::UndefinedVar(id.to_string(), 0).into())
+            Err(EvalErrors::UndefinedVar(id.to_string(), 0))
         } else {
             let new_val = self.eval_expr(expr)?;
             let val = self
@@ -398,7 +385,12 @@ impl<'eval> Eval<'_> {
         }
     }
 
-    fn eval_logical(&mut self, op: &Token, left: &AstExpr, right: &AstExpr) -> EvalResult {
+    fn eval_logical(
+        &mut self,
+        op: &Token,
+        left: &AstExpr,
+        right: &AstExpr,
+    ) -> EvalResult<EvalValue> {
         trace!("eval_logical: {}", op.lexeme);
         let left_val = self.eval_expr(left)?;
         trace!("left = {left_val}");
@@ -426,7 +418,8 @@ impl<'eval> Eval<'_> {
         }
     }
 
-    fn eval_block(&mut self, block: &[Ast]) -> EvalResult {
+    fn eval_block(&mut self, block: &[Ast]) -> EvalResult<EvalValue> {
+        trace!("eval_block");
         self.state.push();
 
         // Use a closure to ensure pop() is always called
@@ -466,15 +459,18 @@ impl<'eval> Eval<'_> {
         cond: &AstExpr,
         then_block: &Ast,
         else_block: &Option<Box<Ast>>,
-    ) -> EvalResult {
+    ) -> EvalResult<EvalValue> {
+        trace!("eval_if");
         let cond_result = self.eval_expr(cond)?;
         if Eval::is_truthy(&cond_result) {
+            trace!("eval_if:then");
             match then_block {
                 Ast::Block(asts) => self.eval_block(asts),
                 Ast::Statement(ast_stmt) => self.eval_stmt(ast_stmt),
                 _ => todo!("then block not block or statement"),
             }
         } else if let Some(ast) = else_block {
+            trace!("eval_if:else");
             match ast.as_ref() {
                 Ast::Block(block) => self.eval_block(block),
                 Ast::Statement(stmt) => self.eval_stmt(stmt),
@@ -484,11 +480,29 @@ impl<'eval> Eval<'_> {
             Ok(EvalValue::Nil)
         }
     }
+
+    fn eval_while(&mut self, cond: &AstExpr, body: &Ast) -> EvalResult<EvalValue> {
+        trace!("eval_while");
+        loop {
+            if Eval::is_truthy(&self.eval_expr(cond)?) {
+                match body {
+                    Ast::Block(asts) => self.eval_block(asts)?,
+                    Ast::Statement(ast_stmt) => self.eval_stmt(ast_stmt)?,
+                    _ => todo!("then block not block or statement"),
+                }
+            } else {
+                break;
+            };
+        }
+
+        Ok(EvalValue::Nil)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::print_ast;
     use crate::span::Span;
 
     #[test]
@@ -829,18 +843,20 @@ mod tests {
         let error1 = EvalErrors::InvalidUnaryOp {
             op: Lexeme::Bang,
             val: EvalValue::String("test".to_string()),
+            line: 1,
         };
-        assert_eq!(format!("{error1}"), "invalid op ! for test");
+        assert_eq!(format!("{error1}"), "invalid op ! for test\n[line 1]");
 
         let error2 = EvalErrors::InvalidBinaryOp {
             op: Lexeme::Plus,
+            line: 2,
         };
-        assert_eq!(format!("{error2}"), "invalid operation PLUS +");
+        assert_eq!(format!("{error2}"), "invalid operation PLUS +\n[line 2]");
 
-        let error3 = EvalErrors::StringsOrNumbers;
+        let error3 = EvalErrors::StringsOrNumbers(3);
         assert_eq!(
             format!("{error3}"),
-            "Operands must be two numbers or two strings."
+            "Operands must be two numbers or two strings.\n[line 3]"
         );
     }
 
@@ -935,7 +951,6 @@ mod tests {
             lexeme: Lexeme::Plus,
             span: Span::new(0, 0, 1),
         };
-
         let number_expr = AstExpr::Terminal(Token {
             lexeme: Lexeme::Number("42".to_string(), 42.0),
             span: Span::new(0, 0, 1),
@@ -1302,4 +1317,33 @@ mod tests {
         let result = eval.evaluate().unwrap();
         assert_eq!(result, EvalValue::Number(5.0));
     }
+
+    #[test]
+    fn test_print_ast_simple() {
+        let source = "var x = 42; print x;";
+        let parser = Parser::new(source, false, false);
+        let ast = parser.parse().unwrap();
+
+        // This would print to stdout, so we just verify it doesn't panic
+        print_ast(&ast);
+    }
+
+    #[test]
+    fn test_print_ast_complex() {
+        let source = r#"
+        var a = 10;
+        if (a > 5) {
+            print "large";
+        } else {
+            print "small";
+        }
+        "#;
+        let parser = Parser::new(source, false, false);
+        let ast = parser.parse().unwrap();
+
+        // This would print to stdout, so we just verify it doesn't panic
+        print_ast(&ast);
+    }
 }
+
+// Note: From implementations are not needed since thiserror already provides them

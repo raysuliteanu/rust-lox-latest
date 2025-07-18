@@ -9,17 +9,21 @@ This is a Rust implementation of the Lox programming language interpreter, follo
 ## Commands
 
 ### Build and Run
+
 - `cargo build` - Build the project
 - `cargo build --release` - Build with optimizations
 - `cargo run -- <command> <file>` - Run the interpreter with commands
 
 ### Testing
+
 - `cargo test` - Run all tests
 - `cargo test <test_name>` - Run specific test
 - `cargo test -- --test-threads=1` - Run tests serially
 
 ### Lox Interpreter Commands
+
 The interpreter supports multiple operational modes:
+
 - `cargo run -- tokenize <file.lox>` - Tokenize a Lox source file
 - `cargo run -- parse <file.lox>` - Parse a Lox source file and display AST
 - `cargo run -- evaluate <file.lox>` - Evaluate a Lox source file
@@ -31,42 +35,48 @@ The interpreter supports multiple operational modes:
 ### Core Components
 
 1. **Lexical Analysis (token.rs)**
-   - `Scanner` - Tokenizes Lox source code into tokens
-   - `Token` - Represents individual tokens with lexemes and span information
-   - `Lexeme` - Enumeration of all possible token types in Lox
+
+    - `Scanner` - Tokenizes Lox source code into tokens
+    - `Token` - Represents individual tokens with lexemes and span information
+    - `Lexeme` - Enumeration of all possible token types in Lox
 
 2. **Parsing (parser.rs)**
-   - `Parser` - Recursive descent parser that builds AST from tokens
-   - Implements the complete Lox grammar with proper precedence
-   - Comprehensive error handling with custom error types
+
+    - `Parser` - Recursive descent parser that builds AST from tokens
+    - Implements the complete Lox grammar with proper precedence
+    - Comprehensive error handling with custom error types
 
 3. **AST Model (model.rs)**
-   - `Ast` - Top-level AST node types (declarations, statements, expressions)
-   - `AstExpr` - Expression AST nodes (binary, unary, terminal, etc.)
-   - `AstStmt` - Statement AST nodes (print, return, if, while, etc.)
-   - All AST types implement `Display` for pretty-printing
+
+    - `Ast` - Top-level AST node types (declarations, statements, expressions)
+    - `AstExpr` - Expression AST nodes (binary, unary, terminal, etc.)
+    - `AstStmt` - Statement AST nodes (print, return, if, while, etc.)
+    - All AST types implement `Display` for pretty-printing
 
 4. **Evaluation (eval.rs)**
-   - `Eval` - Tree-walking interpreter for executing Lox code
-   - `EvalValue` - Runtime value representation
-   - Currently supports basic expressions and print statements
+
+    - `Eval` - Tree-walking interpreter for executing Lox code
+    - `EvalValue` - Runtime value representation
+    - Currently supports basic expressions and print statements
 
 5. **Source Location (span.rs)**
-   - `Span` - Tracks line numbers and character positions for error reporting
+    - `Span` - Tracks line numbers and character positions for error reporting
 
 ### Grammar Implementation
 
 The parser implements the complete Lox grammar with proper operator precedence:
+
 - Equality operators (==, !=)
-- Comparison operators (>, >=, <, <=)  
+- Comparison operators (>, >=, <, <=)
 - Term operators (+, -)
-- Factor operators (*, /)
+- Factor operators (\*, /)
 - Unary operators (!, -)
 - Primary expressions (literals, identifiers, grouping)
 
 ### Current Implementation Status
 
 **Completed:**
+
 - Full lexical analysis with all Lox tokens
 - Complete parsing with proper precedence and error handling
 - AST construction and display
@@ -75,6 +85,7 @@ The parser implements the complete Lox grammar with proper operator precedence:
 - Comprehensive test coverage
 
 **In Progress:**
+
 - Binary expression evaluation (stubbed)
 - Variable assignment and scoping
 - Control flow (if/else, while, for)
@@ -92,6 +103,7 @@ The parser implements the complete Lox grammar with proper operator precedence:
 ## Testing Approach
 
 Tests are embedded within each module using `#[cfg(test)]`. Key test areas:
+
 - Token scanning with various input types
 - Parser functionality for all grammar rules
 - AST construction and display formatting

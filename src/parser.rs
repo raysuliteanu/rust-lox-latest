@@ -4,8 +4,8 @@ use std::iter::Peekable;
 use log::trace;
 use thiserror::Error;
 
-use crate::model::{Ast, AstExpr, AstStmt};
-use crate::token::{Lexeme, Scanner, Token, lexeme_from};
+use crate::model::{Ast, AstExpr, AstStmt, Lexeme, Token};
+use crate::token::{Scanner, lexeme_from};
 
 type PeekableTokenIter<'a> = Peekable<std::slice::Iter<'a, Token>>;
 
@@ -277,12 +277,12 @@ impl<'parser> Parser<'parser> {
         let r = match tokens.peek() {
             Some(token) => match token.lexeme {
                 // left brace token indicates block start
-                crate::token::Lexeme::LeftBrace => self.parse_block(tokens),
-                crate::token::Lexeme::For => self.for_stmt(tokens).map_err(|e| e.into()),
-                crate::token::Lexeme::If => self.if_stmt(tokens),
-                crate::token::Lexeme::Print => self.print_stmt(tokens),
-                crate::token::Lexeme::Return => self.return_stmt(tokens),
-                crate::token::Lexeme::While => self.while_stmt(tokens),
+                Lexeme::LeftBrace => self.parse_block(tokens),
+                Lexeme::For => self.for_stmt(tokens).map_err(|e| e.into()),
+                Lexeme::If => self.if_stmt(tokens),
+                Lexeme::Print => self.print_stmt(tokens),
+                Lexeme::Return => self.return_stmt(tokens),
+                Lexeme::While => self.while_stmt(tokens),
                 _ => {
                     let ast = self.expression_statement(tokens)?;
                     Ok(ast)
@@ -1391,7 +1391,7 @@ mod tests {
         // Check that it's parsed as an expression statement
         match &ast[0] {
             Ast::Statement(AstStmt::Expression(expr)) => match expr {
-                AstExpr::Call { id, args } => {
+                AstExpr::Call { id: _, args } => {
                     assert_eq!(args.len(), 2);
                     assert_eq!(expr.to_string(), "foo([42.0, hello])");
                 }

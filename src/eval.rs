@@ -5,8 +5,8 @@ use std::fmt::Display;
 use thiserror::Error;
 
 use crate::model::{Ast, AstExpr, AstStmt};
+use crate::model::{Lexeme, Token};
 use crate::parser::Parser;
-use crate::token::{Lexeme, Token};
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum EvalValue {
@@ -222,7 +222,7 @@ impl<'eval> Eval<'_> {
             AstExpr::Unary { op, exp } => self.eval_unary(op, exp),
             AstExpr::Binary { op, left, right } => self.eval_binary(op, left, right),
             AstExpr::Assignment { id, expr } => self.eval_assignment(id, expr),
-            AstExpr::Call { id, args } => todo!("call"),
+            AstExpr::Call { id: _, args: _ } => todo!("call"),
             AstExpr::Logical { op, left, right } => self.eval_logical(op, left, right),
         }
     }
@@ -276,7 +276,12 @@ impl<'eval> Eval<'_> {
         Ok(result)
     }
 
-    fn eval_binary(&mut self, op: &Token, left: &AstExpr, right: &AstExpr) -> EvalResult<EvalValue> {
+    fn eval_binary(
+        &mut self,
+        op: &Token,
+        left: &AstExpr,
+        right: &AstExpr,
+    ) -> EvalResult<EvalValue> {
         trace!("eval_binary");
         let left_expr = self.eval_expr(left)?;
         let right_expr = self.eval_expr(right)?;
@@ -341,7 +346,11 @@ impl<'eval> Eval<'_> {
     }
 
     // var some_var [= expr] ;
-    fn eval_var_decl(&mut self, token: &Token, ast: &Option<Box<AstExpr>>) -> EvalResult<EvalValue> {
+    fn eval_var_decl(
+        &mut self,
+        token: &Token,
+        ast: &Option<Box<AstExpr>>,
+    ) -> EvalResult<EvalValue> {
         let initializer = if let Some(expr) = ast {
             Some(self.eval_expr(expr)?)
         } else {
@@ -376,7 +385,12 @@ impl<'eval> Eval<'_> {
         }
     }
 
-    fn eval_logical(&mut self, op: &Token, left: &AstExpr, right: &AstExpr) -> EvalResult<EvalValue> {
+    fn eval_logical(
+        &mut self,
+        op: &Token,
+        left: &AstExpr,
+        right: &AstExpr,
+    ) -> EvalResult<EvalValue> {
         trace!("eval_logical: {}", op.lexeme);
         let left_val = self.eval_expr(left)?;
         trace!("left = {left_val}");

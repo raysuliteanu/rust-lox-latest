@@ -263,7 +263,7 @@ impl<'parser> Parser<'parser> {
                     } else if tokens.peek().is_some() {
                         ast_expected_token!(tokens.peek().unwrap(), lexeme_from(";"))
                     } else {
-                        Err(ParseError::UnexpectedEof.into())
+                        Err(ParseError::UnexpectedEof)
                     }
                 }
                 _ => ast_expected_token!(t, lexeme_from("identifier")),
@@ -278,7 +278,7 @@ impl<'parser> Parser<'parser> {
             Some(token) => match token.lexeme {
                 // left brace token indicates block start
                 Lexeme::LeftBrace => self.parse_block(tokens),
-                Lexeme::For => self.for_stmt(tokens).map_err(|e| e.into()),
+                Lexeme::For => self.for_stmt(tokens),
                 Lexeme::If => self.if_stmt(tokens),
                 Lexeme::Print => self.print_stmt(tokens),
                 Lexeme::Return => self.return_stmt(tokens),
@@ -552,7 +552,7 @@ impl<'parser> Parser<'parser> {
                 _ => token.lexeme.to_string(),
             }
         } else {
-            return Err(ParseError::UnexpectedEof.into());
+            return Err(ParseError::UnexpectedEof);
         };
 
         let left = self.logical_or(tokens)?;
@@ -746,7 +746,7 @@ impl<'parser> Parser<'parser> {
                     tokens.next().unwrap().lexeme.clone()
                 ))
             } else {
-                Err(ParseError::UnexpectedEof.into())
+                Err(ParseError::UnexpectedEof)
             }
         } else if let Some(token) = tokens.next_if(|t| {
             matches!(
@@ -1395,7 +1395,7 @@ mod tests {
                     assert_eq!(args.len(), 2);
                     assert_eq!(expr.to_string(), "foo([42.0, hello])");
                 }
-                _ => panic!("Expected Call expression, got {:?}", expr),
+                _ => panic!("Expected call expression, got {expr:?}"),
             },
             _ => panic!("Expected Expression Statement, got {:?}", ast[0]),
         }

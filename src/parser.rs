@@ -61,10 +61,10 @@ macro_rules! ast_missing_token {
 /// it could because the next "token" was actually no more tokens i.e. "eof"
 macro_rules! ast_expected_token {
     ($t: expr, $e: expr) => {
-        Err(crate::parser::ParseError::MissingToken {
+        crate::parser::ParseError::MissingToken {
             expected: $e,
             actual: $t.lexeme.clone(),
-        })
+        }
     };
 }
 
@@ -246,7 +246,7 @@ impl<'parser> Parser<'parser> {
             if let Some(id) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::Identifier { .. })) {
                 match &id.lexeme {
                     Lexeme::Identifier(i) => i.clone(),
-                    _ => panic!("matched {id} but next_if said it was an Lexeme::Identifier"),
+                    _ => panic!("matched {id} but next_if() said it was an Lexeme::Identifier"),
                 }
             } else {
                 todo!("expected identifier");
@@ -309,12 +309,15 @@ impl<'parser> Parser<'parser> {
                     if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
                         Ok(Ast::Variable { name, initializer })
                     } else if tokens.peek().is_some() {
-                        ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
+                        Err(ast_expected_token!(
+                            tokens.peek().unwrap(),
+                            Lexeme::SemiColon
+                        ))
                     } else {
                         Err(ParseError::UnexpectedEof)
                     }
                 }
-                _ => ast_expected_token!(t, Lexeme::from("identifier")),
+                _ => Err(ast_expected_token!(t, Lexeme::from("identifier"))),
             },
             _ => Err(ParseError::UnexpectedEof),
         }
@@ -531,7 +534,10 @@ impl<'parser> Parser<'parser> {
         if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
             Ok(Ast::Statement(AstStmt::Print(expr)))
         } else if tokens.peek().is_some() {
-            ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
+            Err(ast_expected_token!(
+                tokens.peek().unwrap(),
+                Lexeme::SemiColon
+            ))
         } else {
             Err(ParseError::UnexpectedEof)
         }
@@ -542,6 +548,7 @@ impl<'parser> Parser<'parser> {
 
         // Consume the 'return' token first
         let return_token = tokens.next().unwrap();
+        assert_eq!(return_token.lexeme, Lexeme::Return);
 
         if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
             // a "naked" 'return' without expression i.e. "return;"
@@ -561,12 +568,15 @@ impl<'parser> Parser<'parser> {
             if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
                 Ok(Ast::Statement(AstStmt::Return(Some(Box::new(ast)))))
             } else if tokens.peek().is_some() {
-                ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
+                Err(ast_expected_token!(
+                    tokens.peek().unwrap(),
+                    Lexeme::SemiColon
+                ))
             } else {
                 Err(ast_missing_token!(Lexeme::SemiColon, Lexeme::Eof))
             }
         } else {
-            ast_expected_token!(return_token, Lexeme::SemiColon)
+            Err(ast_expected_token!(return_token, Lexeme::SemiColon))
         }
     }
 
@@ -577,7 +587,10 @@ impl<'parser> Parser<'parser> {
         if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
             Ok(Ast::Statement(AstStmt::Expression(expr)))
         } else if tokens.peek().is_some() {
-            ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
+            Err(ast_expected_token!(
+                tokens.peek().unwrap(),
+                Lexeme::SemiColon
+            ))
         } else {
             Err(ast_missing_token!(Lexeme::SemiColon, Lexeme::Eof))
         }
@@ -735,11 +748,6 @@ impl<'parser> Parser<'parser> {
 
         // if expr is an Identifier, (e.g. 'foo'), then if next is an open paren then this is a
         // call, otherewise just a normal expr
-        //
-        // foo()
-        // foo(a)
-        // foo(a, b, c)
-        // foo(a(b, c), d)
         let result = match tokens.peek() {
             Some(t) if t.lexeme == Lexeme::LeftParen => {
                 trace!("call: args start");

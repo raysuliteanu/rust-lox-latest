@@ -14,8 +14,12 @@ const MAX_FUNC_ARGS: u8 = u8::MAX;
 #[derive(Error, Debug, Clone)]
 pub enum ParseError {
     #[error("missing token '{}' got '{}'", expected.lexeme_str(), actual.lexeme_str())]
-    MissingToken { expected: Lexeme, actual: Lexeme },
-    #[error("unexpected token '{}'", actual.lexeme.lexeme_str())]
+    MissingToken {
+        expected: Lexeme,
+        actual: Lexeme,
+        line: usize,
+    },
+    #[error("[line {}] unexpected token '{}'", actual.span.line(), actual.lexeme.lexeme_str())]
     UnexpectedToken { actual: Token },
     #[error("Unexpected EOF")]
     UnexpectedEof,
@@ -30,7 +34,7 @@ pub enum ParseError {
 
 pub type ParseResult<T> = Result<T, ParseError>;
 
-macro_rules! call_expression {
+macro_rules! ast_call_expression {
     ($id: expr, $args: expr) => {
         crate::model::AstExpr::Call {
             func: Box::new($id),
@@ -38,7 +42,7 @@ macro_rules! call_expression {
         }
     };
 }
-macro_rules! expression_expected {
+macro_rules! ast_expression_expected {
     ($t: expr, $s: expr) => {{
         crate::parser::ParseError::ExpectedExpressionError {
             token: $t,
@@ -47,23 +51,19 @@ macro_rules! expression_expected {
     }};
 }
 
-macro_rules! ast_missing_token {
-    ($e: expr, $a: expr) => {
+macro_rules! ast_expected_token {
+    (token $a: expr, $e: expr) => {
+        crate::parser::ParseError::MissingToken {
+            expected: $e,
+            actual: $a.lexeme.clone(),
+            line: $a.span.line(),
+        }
+    };
+    (lexeme $a: expr, $e: expr) => {
         crate::parser::ParseError::MissingToken {
             expected: $e,
             actual: $a,
-        }
-    };
-}
-
-/// macro for handling error case when next token was not what was expected.
-/// it could be either because the next token was some other "real" token or
-/// it could because the next "token" was actually no more tokens i.e. "eof"
-macro_rules! ast_expected_token {
-    ($t: expr, $e: expr) => {
-        crate::parser::ParseError::MissingToken {
-            expected: $e,
-            actual: $t.lexeme.clone(),
+            line: 0,
         }
     };
 }
@@ -309,7 +309,7 @@ impl<'parser> Parser<'parser> {
                     if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
                         Ok(Ast::Variable { name, initializer })
                     } else if tokens.peek().is_some() {
-                        Err(ast_expected_token!(
+                        Err(ast_expected_token!(token
                             tokens.peek().unwrap(),
                             Lexeme::SemiColon
                         ))
@@ -317,7 +317,7 @@ impl<'parser> Parser<'parser> {
                         Err(ParseError::UnexpectedEof)
                     }
                 }
-                _ => Err(ast_expected_token!(t, Lexeme::from("identifier"))),
+                _ => Err(ast_expected_token!(token t, Lexeme::from("identifier"))),
             },
             _ => Err(ParseError::UnexpectedEof),
         }
@@ -391,7 +391,7 @@ impl<'parser> Parser<'parser> {
                 // e.g. for (var init; cond; incr)
                 Some(token) if token.lexeme == Lexeme::Var => match self.var_decl(tokens) {
                     Ok(expr) => Some(expr),
-                    Err(e) => return Err(expression_expected!(token.clone(), e)),
+                    Err(e) => return Err(ast_expression_expected!(token.clone(), e)),
                 },
                 // expr initializer
                 // e.g. var a; for (a = 1; cond; incr)
@@ -400,7 +400,7 @@ impl<'parser> Parser<'parser> {
                         trace!("for_stmt: init: {expr}");
                         Some(expr)
                     }
-                    Err(e) => return Err(expression_expected!(token.clone(), e)),
+                    Err(e) => return Err(ast_expression_expected!(token.clone(), e)),
                 },
                 // unexpected eof
                 None => return Err(ParseError::UnexpectedEof),
@@ -419,7 +419,7 @@ impl<'parser> Parser<'parser> {
                 let t = (*tokens.peek().unwrap()).clone();
                 let expr = match self.expression(tokens) {
                     Ok(expr) => expr,
-                    Err(e) => return Err(expression_expected!(t.clone(), e)),
+                    Err(e) => return Err(ast_expression_expected!(t.clone(), e)),
                 };
 
                 // must be semicolon after cond
@@ -439,7 +439,7 @@ impl<'parser> Parser<'parser> {
                 let t = (*tokens.peek().unwrap()).clone();
                 let expr = match self.expression(tokens) {
                     Ok(expr) => expr,
-                    Err(e) => return Err(expression_expected!(t.clone(), e)),
+                    Err(e) => return Err(ast_expression_expected!(t.clone(), e)),
                 };
 
                 let _closing_paren = tokens.next();
@@ -534,10 +534,7 @@ impl<'parser> Parser<'parser> {
         if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
             Ok(Ast::Statement(AstStmt::Print(expr)))
         } else if tokens.peek().is_some() {
-            Err(ast_expected_token!(
-                tokens.peek().unwrap(),
-                Lexeme::SemiColon
-            ))
+            Err(ast_expected_token!(token tokens.peek().unwrap(), Lexeme::SemiColon))
         } else {
             Err(ParseError::UnexpectedEof)
         }
@@ -568,15 +565,12 @@ impl<'parser> Parser<'parser> {
             if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
                 Ok(Ast::Statement(AstStmt::Return(Some(Box::new(ast)))))
             } else if tokens.peek().is_some() {
-                Err(ast_expected_token!(
-                    tokens.peek().unwrap(),
-                    Lexeme::SemiColon
-                ))
+                Err(ast_expected_token!(token tokens.peek().unwrap(), Lexeme::SemiColon))
             } else {
-                Err(ast_missing_token!(Lexeme::SemiColon, Lexeme::Eof))
+                Err(ast_expected_token!(lexeme Lexeme::SemiColon, Lexeme::Eof))
             }
         } else {
-            Err(ast_expected_token!(return_token, Lexeme::SemiColon))
+            Err(ast_expected_token!(token return_token, Lexeme::SemiColon))
         }
     }
 
@@ -587,12 +581,9 @@ impl<'parser> Parser<'parser> {
         if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
             Ok(Ast::Statement(AstStmt::Expression(expr)))
         } else if tokens.peek().is_some() {
-            Err(ast_expected_token!(
-                tokens.peek().unwrap(),
-                Lexeme::SemiColon
-            ))
+            Err(ast_expected_token!(token tokens.peek().unwrap(), Lexeme::SemiColon))
         } else {
-            Err(ast_missing_token!(Lexeme::SemiColon, Lexeme::Eof))
+            Err(ast_expected_token!(lexeme Lexeme::SemiColon, Lexeme::Eof))
         }
     }
 
@@ -756,7 +747,7 @@ impl<'parser> Parser<'parser> {
                 while let Some(t) = tokens.peek().cloned() {
                     if t.lexeme == Lexeme::RightParen {
                         let _close_paren = tokens.next();
-                        expr = call_expression!(expr, args);
+                        expr = ast_call_expression!(expr, args);
                         trace!("call: args end");
                         break;
                     }
@@ -797,10 +788,8 @@ impl<'parser> Parser<'parser> {
                 Ok(ast_group!(expr))
             } else if tokens.peek().is_some() {
                 // something other than a closing ')'
-                Err(ast_missing_token!(
-                    Lexeme::RightParen,
-                    tokens.next().unwrap().lexeme.clone()
-                ))
+                let token = tokens.next().unwrap().lexeme.clone();
+                Err(ast_expected_token!(lexeme Lexeme::RightParen, token))
             } else {
                 Err(ParseError::UnexpectedEof)
             }

@@ -214,7 +214,7 @@ impl<'eval> Eval<'_> {
                 name: id,
                 params,
                 body,
-            } => todo!("fun decl"),
+            } => todo!("eval function decl"),
             Ast::Variable { name, initializer } => self.eval_var_decl(name, initializer),
             Ast::Statement(stmt) => self.eval_stmt(stmt),
             Ast::Block(block) => self.eval_block(block),
@@ -245,7 +245,7 @@ impl<'eval> Eval<'_> {
             AstExpr::Unary { op, exp } => self.eval_unary(op, exp),
             AstExpr::Binary { op, left, right } => self.eval_binary(op, left, right),
             AstExpr::Assignment { id, expr } => self.eval_assignment(id, expr),
-            AstExpr::Call { func: _, args: _ } => todo!("call"),
+            AstExpr::Call { func: _, args: _ } => todo!("eval func call"),
             AstExpr::Logical { op, left, right } => self.eval_logical(op, left, right),
         }
     }

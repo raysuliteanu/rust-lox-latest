@@ -8,6 +8,23 @@ use crate::model::{Ast, AstExpr, AstStmt};
 use crate::model::{Lexeme, Token};
 use crate::parser::Parser;
 
+#[allow(dead_code)]
+struct Callable {
+    func: AstExpr,
+    args: Vec<AstExpr>,
+}
+
+#[allow(dead_code)]
+impl Callable {
+    fn call(&self) -> EvalResult<EvalValue> {
+        todo!()
+    }
+
+    fn arity(&self) -> usize {
+        self.args.len()
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub enum EvalValue {
     Number(f64),
@@ -193,8 +210,12 @@ impl<'eval> Eval<'_> {
         trace!("eval_ast");
         match ast {
             Ast::Class => todo!("class decl"),
-            Ast::Function => todo!("fun decl"),
-            Ast::Variable(token, ast) => self.eval_var_decl(token, ast),
+            Ast::Function {
+                name: id,
+                params,
+                body,
+            } => todo!("fun decl"),
+            Ast::Variable { name, initializer } => self.eval_var_decl(name, initializer),
             Ast::Statement(stmt) => self.eval_stmt(stmt),
             Ast::Block(block) => self.eval_block(block),
             Ast::Expression(e) => self.eval_expr(e),
@@ -206,9 +227,11 @@ impl<'eval> Eval<'_> {
         match stmt {
             AstStmt::Expression(expr) => self.eval_expr(expr),
             AstStmt::Print(ast) => self.eval_print_stmt(ast),
-            AstStmt::If(cond, then_block, else_block) => {
-                self.eval_if_stmt(cond, then_block, else_block)
-            }
+            AstStmt::If {
+                condition,
+                then,
+                or_else,
+            } => self.eval_if_stmt(condition, then, or_else),
             AstStmt::Return(_ast) => todo!("return stmts"),
             AstStmt::While(cond, body) => self.eval_while(cond, body),
         }
@@ -222,7 +245,7 @@ impl<'eval> Eval<'_> {
             AstExpr::Unary { op, exp } => self.eval_unary(op, exp),
             AstExpr::Binary { op, left, right } => self.eval_binary(op, left, right),
             AstExpr::Assignment { id, expr } => self.eval_assignment(id, expr),
-            AstExpr::Call { id: _, args: _ } => todo!("call"),
+            AstExpr::Call { func: _, args: _ } => todo!("call"),
             AstExpr::Logical { op, left, right } => self.eval_logical(op, left, right),
         }
     }
@@ -502,8 +525,8 @@ impl<'eval> Eval<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::print_ast;
     use crate::span::Span;
+    use crate::util::print_ast;
 
     #[test]
     fn test_eval_value_display() {
@@ -1345,5 +1368,3 @@ mod tests {
         print_ast(&ast);
     }
 }
-
-// Note: From implementations are not needed since thiserror already provides them

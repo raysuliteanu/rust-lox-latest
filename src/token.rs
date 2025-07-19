@@ -576,5 +576,3 @@ mod tests {
         assert!(!one_of('a', ""));
     }
 }
-
-// Note: From implementations are not needed since thiserror already provides them

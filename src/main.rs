@@ -15,6 +15,7 @@ mod model;
 mod parser;
 mod span;
 mod token;
+mod util;
 
 #[derive(Parser)]
 struct Lox {

@@ -19,7 +19,7 @@ pub enum ParseError {
     UnexpectedToken { actual: Token },
     #[error("Unexpected EOF")]
     UnexpectedEof,
-    #[error("[line {}] Error at '{}' Expect expression.\n{source}", token.span.line(), token.lexeme.lexeme_str())]
+    #[error("[line {}] Error at '{}'. Expect expression.\n{source}", token.span.line(), token.lexeme.lexeme_str())]
     ExpectedExpressionError {
         token: Token,
         source: Box<ParseError>,
@@ -33,7 +33,7 @@ pub type ParseResult<T> = Result<T, ParseError>;
 macro_rules! call_expression {
     ($id: expr, $args: expr) => {
         crate::model::AstExpr::Call {
-            id: Box::new($id),
+            func: Box::new($id),
             args: $args,
         }
     };
@@ -176,7 +176,7 @@ impl<'parser> Parser<'parser> {
                 Ok(v) => {
                     if self.print_ast {
                         if self.pretty_print {
-                            print_ast(&v);
+                            crate::util::print_ast(&v);
                         } else {
                             v.iter().for_each(|node| println!("{node}"));
                         }
@@ -234,8 +234,56 @@ impl<'parser> Parser<'parser> {
         todo!("class decl")
     }
 
-    fn fun_decl(&self, _tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
-        todo!("fun decl")
+    // function   → IDENTIFIER "(" parameters? ")" block ;
+    // parameters → IDENTIFIER ( "," IDENTIFIER )* ;
+    fn fun_decl(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
+        trace!("fun_decl");
+        // consume 'fun' token
+        let fun_token = tokens.next().unwrap();
+        assert_eq!(fun_token.lexeme, Lexeme::Fun);
+
+        let name =
+            if let Some(id) = tokens.next_if(|t| matches!(t.lexeme, Lexeme::Identifier { .. })) {
+                match &id.lexeme {
+                    Lexeme::Identifier(i) => i.clone(),
+                    _ => panic!("matched {id} but next_if said it was an Lexeme::Identifier"),
+                }
+            } else {
+                todo!("expected identifier");
+            };
+
+        let mut params = vec![];
+        if tokens.next_if(|t| t.lexeme == Lexeme::LeftParen).is_some() {
+            while tokens
+                .peek()
+                .is_some_and(|f| f.lexeme != Lexeme::RightParen)
+            {
+                let token = tokens
+                    .next()
+                    .expect("peeked already so there has to be a token");
+                match &token.lexeme {
+                    Lexeme::Identifier(i) => {
+                        params.push(i.clone());
+                        tokens.next_if(|t| t.lexeme == Lexeme::Comma);
+                    }
+                    _ => todo!("invalid token {token}"),
+                }
+            }
+
+            // consume ')' token
+            let rparen = tokens.next().unwrap();
+            assert_eq!(rparen.lexeme, Lexeme::RightParen);
+        } else {
+            todo!("missing open paren for fun decl")
+        };
+
+        let body = self.parse_block(tokens)?;
+
+        Ok(Ast::Function {
+            name,
+            params,
+            body: Box::new(body),
+        })
     }
 
     // varDecl → "var" IDENTIFIER ( "=" expression )? ";" ;
@@ -250,8 +298,8 @@ impl<'parser> Parser<'parser> {
             Some(t) => match &t.lexeme {
                 Lexeme::Identifier(_) => {
                     trace!("found identifier: {t}");
-                    let identifier_token = tokens.next().unwrap().clone();
-                    let expr = if let Some(_e) = tokens.next_if(|t| t.lexeme == Lexeme::Eq) {
+                    let name = tokens.next().unwrap().clone();
+                    let initializer = if let Some(_e) = tokens.next_if(|t| t.lexeme == Lexeme::Eq) {
                         let expr = self.expression(tokens)?;
                         Some(Box::new(expr))
                     } else {
@@ -259,7 +307,7 @@ impl<'parser> Parser<'parser> {
                     };
 
                     if tokens.next_if(|t| t.lexeme == Lexeme::SemiColon).is_some() {
-                        Ok(Ast::Variable(identifier_token, expr))
+                        Ok(Ast::Variable { name, initializer })
                     } else if tokens.peek().is_some() {
                         ast_expected_token!(tokens.peek().unwrap(), Lexeme::SemiColon)
                     } else {
@@ -299,7 +347,10 @@ impl<'parser> Parser<'parser> {
         trace!("block start");
 
         let mut stmts = vec![];
-        while tokens.peek().is_some_and(|t| t.lexeme != Lexeme::RightBrace) {
+        while tokens
+            .peek()
+            .is_some_and(|t| t.lexeme != Lexeme::RightBrace)
+        {
             let stmt = self.declaration(tokens)?;
             stmts.push(stmt);
         }
@@ -443,20 +494,17 @@ impl<'parser> Parser<'parser> {
 
         let cond = self.expression(tokens)?;
         let then_stmt = self.statement(tokens)?;
-        let else_stmt = if tokens
-            .next_if(|t| t.lexeme == Lexeme::Else)
-            .is_some()
-        {
+        let else_stmt = if tokens.next_if(|t| t.lexeme == Lexeme::Else).is_some() {
             Some(Box::new(self.statement(tokens)?))
         } else {
             None
         };
 
-        Ok(Ast::Statement(AstStmt::If(
-            Box::new(cond),
-            Box::new(then_stmt),
-            else_stmt,
-        )))
+        Ok(Ast::Statement(AstStmt::If {
+            condition: Box::new(cond),
+            then: Box::new(then_stmt),
+            or_else: else_stmt,
+        }))
     }
 
     fn while_stmt(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Ast> {
@@ -760,117 +808,6 @@ impl<'parser> Parser<'parser> {
                 actual: tokens.next().unwrap().clone(),
             })
         }
-    }
-}
-
-/// Pretty print the AST as a tree structure with proper indentation
-pub fn print_ast(ast: &[Ast]) {
-    fn print_ast_node(ast: &Ast, level: usize) {
-        let indent = "    ".repeat(level);
-        match ast {
-            Ast::Class => println!("{indent}Class"),
-            Ast::Function => println!("{indent}Function"),
-            Ast::Variable(token, initializer) => {
-                println!("{indent}Variable({token:?}, {initializer:?}),");
-            }
-            Ast::Block(nodes) => {
-                println!("{indent}Block(");
-                for node in nodes {
-                    print_ast_node(node, level + 1);
-                }
-                println!("{indent})");
-            }
-            Ast::Statement(stmt) => {
-                println!("{indent}Statement(");
-                print_ast_stmt(stmt, level + 1);
-                println!("{indent})");
-            }
-            Ast::Expression(expr) => {
-                println!("{indent}Expression(");
-                print_ast_expr(expr, level + 1);
-                println!("{indent})");
-            }
-        }
-    }
-
-    fn print_ast_stmt(stmt: &AstStmt, level: usize) {
-        let indent = "    ".repeat(level);
-        match stmt {
-            AstStmt::If(cond, then_block, else_block) => {
-                println!("{indent}If(");
-                print_ast_expr(cond, level + 1);
-                println!("{indent},");
-                print_ast_node(then_block, level + 1);
-                if let Some(else_block) = else_block {
-                    println!("{indent},");
-                    print_ast_node(else_block, level + 1);
-                }
-                println!("{indent})");
-            }
-            AstStmt::While(cond, body) => {
-                println!("{indent}While(");
-                print_ast_expr(cond, level + 1);
-                println!("{indent},");
-                print_ast_node(body, level + 1);
-                println!("{indent})");
-            }
-            AstStmt::Return(expr) => {
-                println!("{indent}Return({expr:?})");
-            }
-            AstStmt::Print(expr) => {
-                println!("{indent}Print(");
-                print_ast_expr(expr, level + 1);
-                println!("{indent})");
-            }
-            AstStmt::Expression(expr) => {
-                print_ast_expr(expr, level);
-            }
-        }
-    }
-
-    fn print_ast_expr(expr: &AstExpr, level: usize) {
-        let indent = "    ".repeat(level);
-        match expr {
-            AstExpr::Call { id, args } => {
-                println!("{indent}Call {{");
-                println!("{indent}    id:");
-                print_ast_expr(id, level + 2);
-                println!("{indent}    args: [");
-                for (i, arg) in args.iter().enumerate() {
-                    print_ast_expr(arg, level + 2);
-                    if i < args.len() - 1 {
-                        println!("{indent}    ,");
-                    }
-                }
-                println!("{indent}    ]");
-                println!("{indent}}}");
-            }
-            AstExpr::Assignment { id, expr } => {
-                println!("{indent}Assignment {{ id: \"{id}\", expr: {expr:?} }}");
-            }
-            AstExpr::Logical { op, left, right } => {
-                println!("{indent}Logical {{ op: {op:?}, left: {left:?}, right: {right:?} }}");
-            }
-            AstExpr::Terminal(token) => {
-                println!("{indent}Terminal({token:?})");
-            }
-            AstExpr::Group(expr) => {
-                println!("{indent}Group(");
-                print_ast_expr(expr, level + 1);
-                println!("{indent})");
-            }
-            AstExpr::Unary { op, exp } => {
-                println!("{indent}Unary {{ op: {op:?}, exp: {exp:?} }}");
-            }
-            AstExpr::Binary { op, left, right } => {
-                println!("{indent}Binary {{ op: {op:?}, left: {left:?}, right: {right:?} }}");
-            }
-        }
-    }
-
-    println!("AST:");
-    for node in ast {
-        print_ast_node(node, 0);
     }
 }
 
@@ -1342,7 +1279,7 @@ mod tests {
             AstExpr::Terminal(create_token(Lexeme::String("hello".to_string()))),
         ];
         let call = AstExpr::Call {
-            id: Box::new(id),
+            func: Box::new(id),
             args,
         };
         assert_eq!(call.to_string(), "foo([42.0, hello])");
@@ -1352,7 +1289,7 @@ mod tests {
     fn test_ast_display_call_no_args() {
         let id = AstExpr::Terminal(create_token(Lexeme::Identifier("foo".to_string())));
         let call = AstExpr::Call {
-            id: Box::new(id),
+            func: Box::new(id),
             args: vec![],
         };
         assert_eq!(call.to_string(), "foo([])");
@@ -1366,14 +1303,14 @@ mod tests {
             5.0,
         )))];
         let inner_call = AstExpr::Call {
-            id: Box::new(inner_id),
+            func: Box::new(inner_id),
             args: inner_args,
         };
 
         let outer_id = AstExpr::Terminal(create_token(Lexeme::Identifier("foo".to_string())));
         let outer_args = vec![inner_call];
         let outer_call = AstExpr::Call {
-            id: Box::new(outer_id),
+            func: Box::new(outer_id),
             args: outer_args,
         };
 
@@ -1391,7 +1328,7 @@ mod tests {
         // Check that it's parsed as an expression statement
         match &ast[0] {
             Ast::Statement(AstStmt::Expression(expr)) => match expr {
-                AstExpr::Call { id: _, args } => {
+                AstExpr::Call { func: _, args } => {
                     assert_eq!(args.len(), 2);
                     assert_eq!(expr.to_string(), "foo([42.0, hello])");
                 }

@@ -83,12 +83,12 @@ The parser implements the complete Lox grammar with proper operator precedence:
 - Basic expression evaluation
 - Print statement execution
 - Comprehensive test coverage
-
-**In Progress:**
-
 - Binary expression evaluation (stubbed)
 - Variable assignment and scoping
 - Control flow (if/else, while, for)
+
+**In Progress:**
+
 - Function definitions and calls
 - Class definitions and inheritance
 

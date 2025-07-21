@@ -11,10 +11,12 @@ use std::{
 use crate::{eval::EvalValue, parser::ParseError, token::Scanner};
 
 mod eval;
+mod func;
 mod model;
 mod parser;
 mod span;
 mod token;
+mod util;
 
 #[derive(Parser)]
 struct Lox {

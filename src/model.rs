@@ -287,9 +287,15 @@ impl Display for Lexeme {
 #[derive(Debug, PartialEq)]
 pub enum Ast {
     Class,
-    Function,
-    // name, initializer
-    Variable(Token, Option<Box<AstExpr>>),
+    Function {
+        name: String,
+        params: Vec<String>,
+        body: Box<Ast>,
+    },
+    Variable {
+        name: Token,
+        initializer: Option<Box<AstExpr>>,
+    },
     Block(Vec<Ast>),
     Statement(AstStmt),
     Expression(AstExpr),
@@ -298,7 +304,11 @@ pub enum Ast {
 #[derive(Debug, PartialEq)]
 pub enum AstStmt {
     // condition, then, else
-    If(Box<AstExpr>, Box<Ast>, Option<Box<Ast>>),
+    If {
+        condition: Box<AstExpr>,
+        then: Box<Ast>,
+        or_else: Option<Box<Ast>>,
+    },
     // cond, body
     While(Box<AstExpr>, Box<Ast>),
     Return(Option<Box<AstExpr>>),
@@ -309,8 +319,9 @@ pub enum AstStmt {
 #[derive(Debug, PartialEq)]
 pub enum AstExpr {
     Call {
-        id: Box<AstExpr>,
+        func: String,
         args: Vec<AstExpr>,
+        site: Span,
     },
     Assignment {
         id: String,
@@ -339,14 +350,17 @@ impl Display for Ast {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Ast::Class => todo!(),
-            Ast::Function => todo!(),
-            Ast::Variable(ident, expr) => {
-                let name = match &ident.lexeme {
+            Ast::Function { name, params, body } => {
+                writeln!(f, "fun {name} ({}) {{", params.join(", "))?;
+                writeln!(f, "{body} }}")
+            }
+            Ast::Variable { name, initializer } => {
+                let name = match &name.lexeme {
                     Lexeme::Identifier(name) => name,
                     _ => panic!("Variable declaration must have an identifier token"),
                 };
                 write!(f, "var {name}")?;
-                if let Some(ast) = expr {
+                if let Some(ast) = initializer {
                     write!(f, " = {ast}")?;
                 }
                 write!(f, ";")
@@ -367,7 +381,11 @@ impl Display for Ast {
 impl Display for AstExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AstExpr::Call { id, args } => {
+            AstExpr::Call {
+                func: id,
+                args,
+                site: _,
+            } => {
                 let args_str = args
                     .iter()
                     .map(|arg| arg.to_string())
@@ -441,9 +459,13 @@ fn print_ast_token(token: &Token) -> String {
 impl Display for AstStmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AstStmt::If(cond, then_stmt, else_stmt) => {
-                write!(f, "if {cond} {then_stmt}")?;
-                if let Some(else_stmt) = else_stmt {
+            AstStmt::If {
+                condition,
+                then,
+                or_else,
+            } => {
+                write!(f, "if {condition} {then}")?;
+                if let Some(else_stmt) = or_else {
                     write!(f, " else {else_stmt}")?;
                 }
                 Ok(())

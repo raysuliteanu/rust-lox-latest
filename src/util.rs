@@ -81,10 +81,14 @@ pub fn print_ast(ast: &[Ast]) {
     fn print_ast_expr(expr: &AstExpr, level: usize) {
         let indent = INDENT.repeat(level);
         match expr {
-            AstExpr::Call { func, args } => {
+            AstExpr::Call {
+                func,
+                args,
+                site: _,
+            } => {
                 println!("{indent}Call {{");
                 println!("{indent}    func:");
-                print_ast_expr(func, level + 2);
+                println!("{indent}{func}");
                 println!("{indent}    args: [");
                 for (i, arg) in args.iter().enumerate() {
                     print_ast_expr(arg, level + 2);

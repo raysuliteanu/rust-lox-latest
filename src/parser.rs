@@ -35,10 +35,11 @@ pub enum ParseError {
 pub type ParseResult<T> = Result<T, ParseError>;
 
 macro_rules! ast_call_expression {
-    ($id: expr, $args: expr) => {
+    ($id: expr, $args: expr, $site: expr) => {
         crate::model::AstExpr::Call {
-            func: Box::new($id),
+            func: $id,
             args: $args,
+            site: $site,
         }
     };
 }
@@ -735,42 +736,90 @@ impl<'parser> Parser<'parser> {
     // arguments → expression ( "," expression )* ;
     fn call(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
         trace!("call");
+
         let mut expr = self.primary(tokens)?;
 
-        // if expr is an Identifier, (e.g. 'foo'), then if next is an open paren then this is a
-        // call, otherewise just a normal expr
-        let result = match tokens.peek() {
-            Some(t) if t.lexeme == Lexeme::LeftParen => {
-                trace!("call: args start");
-                let _open_paren = tokens.next();
-                let mut args = vec![];
-                while let Some(t) = tokens.peek().cloned() {
-                    if t.lexeme == Lexeme::RightParen {
-                        let _close_paren = tokens.next();
-                        expr = ast_call_expression!(expr, args);
-                        trace!("call: args end");
-                        break;
-                    }
+        let result = match &expr {
+            AstExpr::Terminal(token) => match &token.lexeme {
+                Lexeme::Identifier(id) => match tokens.peek() {
+                    Some(_t) if _t.lexeme == Lexeme::LeftParen => {
+                        trace!("call: args start");
+                        let _open_paren = tokens.next();
 
-                    let arg = self.expression(tokens)?;
-                    args.push(arg);
+                        let mut args = vec![];
 
-                    // limit number of args to 256 (per Crafting Interpeters book, Ch 10)
-                    if args.len() >= MAX_FUNC_ARGS as usize {
-                        return Err(ParseError::TooManyFunctionArgs(t.span.line()));
-                    }
+                        // while not closing paren ...
+                        while let Some(t) = tokens.peek().cloned() {
+                            // if closing paren, then done with args processing
+                            if t.lexeme == Lexeme::RightParen {
+                                let _close_paren = tokens.next();
+                                expr = ast_call_expression!((*id).clone(), args, t.span.clone());
+                                trace!("call: args end");
+                                break;
+                            }
 
-                    if tokens.peek().is_some_and(|t| t.lexeme == Lexeme::Comma) {
-                        let _comma = tokens.next();
+                            let arg = self.expression(tokens)?;
+                            args.push(arg);
+
+                            // limit number of args to 256 (per Crafting Interpeters book, Ch 10)
+                            if args.len() >= MAX_FUNC_ARGS as usize {
+                                return Err(ParseError::TooManyFunctionArgs(t.span.line()));
+                            }
+
+                            if tokens.peek().is_some_and(|t| t.lexeme == Lexeme::Comma) {
+                                let _comma = tokens.next();
+                            }
+                        }
+
+                        expr
                     }
-                }
-                expr
-            }
-            Some(_) => expr,
-            None => return Err(ParseError::UnexpectedEof),
+                    Some(_) | None => expr,
+                },
+                _ => expr,
+            },
+            _ => expr,
         };
 
         Ok(result)
+
+        // // if expr is an Identifier, (e.g. 'foo'), then if next is an open paren then this is a
+        // // call, otherewise just a normal expr
+        // let result = match tokens.peek() {
+        //     Some(_t) if _t.lexeme == Lexeme::LeftParen => {
+        //         trace!("call: args start");
+        //         let _open_paren = tokens.next();
+        //
+        //         let mut args = vec![];
+        //
+        //         // while not closing paren ...
+        //         while let Some(t) = tokens.peek().cloned() {
+        //             // if closing paren, then done with args processing
+        //             if t.lexeme == Lexeme::RightParen {
+        //                 let _close_paren = tokens.next();
+        //                 expr = ast_call_expression!(expr, args, t.span.clone());
+        //                 trace!("call: args end");
+        //                 break;
+        //             }
+        //
+        //             let arg = self.expression(tokens)?;
+        //             args.push(arg);
+        //
+        //             // limit number of args to 256 (per Crafting Interpeters book, Ch 10)
+        //             if args.len() >= MAX_FUNC_ARGS as usize {
+        //                 return Err(ParseError::TooManyFunctionArgs(t.span.line()));
+        //             }
+        //
+        //             if tokens.peek().is_some_and(|t| t.lexeme == Lexeme::Comma) {
+        //                 let _comma = tokens.next();
+        //             }
+        //         }
+        //         expr
+        //     }
+        //     Some(_) => expr,
+        //     None => return Err(ParseError::UnexpectedEof),
+        // };
+        //
+        // Ok(result)
     }
 
     // primary → "true" | "false" | "nil" | "this"
@@ -1270,45 +1319,45 @@ mod tests {
 
     #[test]
     fn test_ast_display_call_expression() {
-        let id = AstExpr::Terminal(create_token(Lexeme::Identifier("foo".to_string())));
         let args = vec![
             AstExpr::Terminal(create_token(Lexeme::Number("42".to_string(), 42.0))),
             AstExpr::Terminal(create_token(Lexeme::String("hello".to_string()))),
         ];
         let call = AstExpr::Call {
-            func: Box::new(id),
+            func: "foo".to_string(),
             args,
+            site: Span::new(1, 0, 1),
         };
         assert_eq!(call.to_string(), "foo([42.0, hello])");
     }
 
     #[test]
     fn test_ast_display_call_no_args() {
-        let id = AstExpr::Terminal(create_token(Lexeme::Identifier("foo".to_string())));
         let call = AstExpr::Call {
-            func: Box::new(id),
+            func: "foo".to_string(),
             args: vec![],
+            site: Span::new(1, 0, 1),
         };
         assert_eq!(call.to_string(), "foo([])");
     }
 
     #[test]
     fn test_ast_display_nested_call() {
-        let inner_id = AstExpr::Terminal(create_token(Lexeme::Identifier("bar".to_string())));
         let inner_args = vec![AstExpr::Terminal(create_token(Lexeme::Number(
             "5".to_string(),
             5.0,
         )))];
         let inner_call = AstExpr::Call {
-            func: Box::new(inner_id),
+            func: "bar".to_string(),
             args: inner_args,
+            site: Span::new(1, 0, 1),
         };
 
-        let outer_id = AstExpr::Terminal(create_token(Lexeme::Identifier("foo".to_string())));
         let outer_args = vec![inner_call];
         let outer_call = AstExpr::Call {
-            func: Box::new(outer_id),
+            func: "foo".to_string(),
             args: outer_args,
+            site: Span::new(1, 0, 1),
         };
 
         assert_eq!(outer_call.to_string(), "foo([bar([5.0])])");
@@ -1325,7 +1374,11 @@ mod tests {
         // Check that it's parsed as an expression statement
         match &ast[0] {
             Ast::Statement(AstStmt::Expression(expr)) => match expr {
-                AstExpr::Call { func: _, args } => {
+                AstExpr::Call {
+                    func: _,
+                    args,
+                    site: _,
+                } => {
                     assert_eq!(args.len(), 2);
                     assert_eq!(expr.to_string(), "foo([42.0, hello])");
                 }

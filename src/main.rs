@@ -11,6 +11,7 @@ use std::{
 use crate::{eval::EvalValue, parser::ParseError, token::Scanner};
 
 mod eval;
+mod func;
 mod model;
 mod parser;
 mod span;

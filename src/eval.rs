@@ -4,26 +4,13 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
 use thiserror::Error;
 
+use crate::func;
 use crate::model::{Ast, AstExpr, AstStmt};
 use crate::model::{Lexeme, Token};
 use crate::parser::Parser;
+use crate::span::Span;
 
-#[allow(dead_code)]
-struct Callable {
-    func: AstExpr,
-    args: Vec<AstExpr>,
-}
-
-#[allow(dead_code)]
-impl Callable {
-    fn call(&self) -> EvalResult<EvalValue> {
-        todo!()
-    }
-
-    fn arity(&self) -> usize {
-        self.args.len()
-    }
-}
+pub type Callable = fn(&[EvalValue]) -> EvalResult<EvalValue>;
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum EvalValue {
@@ -84,6 +71,7 @@ pub type EvalResult<T> = Result<T, EvalErrors>;
 #[derive(Default)]
 struct EvalEnv {
     vars: HashMap<String, EvalValue>,
+    fns: HashMap<String, Callable>,
 }
 
 impl EvalEnv {
@@ -107,6 +95,10 @@ impl EvalEnv {
     fn lookup_var_mut(&mut self, id: &str) -> Option<&mut EvalValue> {
         self.vars.get_mut(id)
     }
+
+    fn lookup_fn(&self, id: String) -> Option<&Callable> {
+        self.fns.get(&id)
+    }
 }
 
 type Stack<T> = VecDeque<T>;
@@ -117,9 +109,22 @@ struct EvalState {
 
 impl EvalState {
     fn new() -> Self {
+        let mut global_env = EvalEnv::new();
+        global_env.fns.insert("clock".to_string(), func::clock);
+
         let mut env = Stack::new();
-        env.push_front(EvalEnv::new());
+        env.push_front(global_env);
         EvalState { env }
+    }
+
+    fn lookup_fn(&mut self, id: &str) -> Option<&Callable> {
+        for env in &self.env {
+            if env.fns.contains_key(id) {
+                return env.lookup_fn(id.to_string());
+            }
+        }
+
+        None
     }
 
     fn add_var(&mut self, id: String, initializer: Option<EvalValue>) -> Option<EvalValue> {
@@ -211,9 +216,9 @@ impl<'eval> Eval<'_> {
         match ast {
             Ast::Class => todo!("class decl"),
             Ast::Function {
-                name: id,
-                params,
-                body,
+                name: _,
+                params: _,
+                body: _,
             } => todo!("eval function decl"),
             Ast::Variable { name, initializer } => self.eval_var_decl(name, initializer),
             Ast::Statement(stmt) => self.eval_stmt(stmt),
@@ -245,7 +250,7 @@ impl<'eval> Eval<'_> {
             AstExpr::Unary { op, exp } => self.eval_unary(op, exp),
             AstExpr::Binary { op, left, right } => self.eval_binary(op, left, right),
             AstExpr::Assignment { id, expr } => self.eval_assignment(id, expr),
-            AstExpr::Call { func: _, args: _ } => todo!("eval func call"),
+            AstExpr::Call { func, args, site } => self.eval_call(func, args, site),
             AstExpr::Logical { op, left, right } => self.eval_logical(op, left, right),
         }
     }
@@ -519,6 +524,21 @@ impl<'eval> Eval<'_> {
         }
 
         Ok(EvalValue::Nil)
+    }
+
+    fn eval_call(&mut self, func: &str, args: &[AstExpr], site: &Span) -> EvalResult<EvalValue> {
+        let mut vals = Vec::with_capacity(args.len());
+        for arg in args {
+            let val = self.eval_expr(arg)?;
+            vals.push(val.clone());
+        }
+
+        let fun = self.state.lookup_fn(func);
+        if let Some(f) = fun {
+            f(&vals)
+        } else {
+            todo!("no such fn invoked at {site}")
+        }
     }
 }
 

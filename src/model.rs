@@ -319,8 +319,9 @@ pub enum AstStmt {
 #[derive(Debug, PartialEq)]
 pub enum AstExpr {
     Call {
-        func: Box<AstExpr>,
+        func: String,
         args: Vec<AstExpr>,
+        site: Span,
     },
     Assignment {
         id: String,
@@ -349,7 +350,10 @@ impl Display for Ast {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Ast::Class => todo!(),
-            Ast::Function { name, params, body } => todo!(),
+            Ast::Function { name, params, body } => {
+                writeln!(f, "fun {name} ({}) {{", params.join(", "))?;
+                writeln!(f, "{body} }}")
+            }
             Ast::Variable { name, initializer } => {
                 let name = match &name.lexeme {
                     Lexeme::Identifier(name) => name,
@@ -377,7 +381,11 @@ impl Display for Ast {
 impl Display for AstExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AstExpr::Call { func: id, args } => {
+            AstExpr::Call {
+                func: id,
+                args,
+                site: _,
+            } => {
                 let args_str = args
                     .iter()
                     .map(|arg| arg.to_string())

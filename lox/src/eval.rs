@@ -14,6 +14,7 @@ pub type Callable = fn(&[EvalValue]) -> EvalResult<EvalValue>;
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum EvalValue {
+    Return(Box<EvalValue>),
     FunDecl(LoxFunction),
     Number(f64),
     String(String),
@@ -29,6 +30,7 @@ impl Display for EvalValue {
             EvalValue::Boolean(b) => write!(f, "{b}"),
             EvalValue::Nil => write!(f, "nil"),
             EvalValue::FunDecl(func) => write!(f, "{func}"),
+            EvalValue::Return(value) => write!(f, "{value}"),
         }
     }
 }
@@ -528,10 +530,13 @@ impl<'eval> Eval<'_> {
         let mut guard = self.state.push();
         for ast in block {
             result = self.eval_ast(ast)?;
-            if let Ast::Statement(AstStmt::Return(_)) = ast {
-                break;
+
+            if let EvalValue::Return(v) = result {
+                guard.pop_scope(&mut self.state);
+                return Ok(EvalValue::Return(v));
             }
         }
+
         guard.pop_scope(&mut self.state);
 
         Ok(result)
@@ -550,14 +555,14 @@ impl<'eval> Eval<'_> {
             match then_block {
                 Ast::Block(asts) => self.eval_block(asts),
                 Ast::Statement(ast_stmt) => self.eval_stmt(ast_stmt),
-                _ => todo!("then block not block or statement"),
+                _ => panic!("then block not block or statement"),
             }
         } else if let Some(ast) = else_block {
             trace!("eval_if:else");
             match ast.as_ref() {
                 Ast::Block(block) => self.eval_block(block),
                 Ast::Statement(stmt) => self.eval_stmt(stmt),
-                _ => todo!("then block not block or statement"),
+                _ => panic!("else block not block or statement"),
             }
         } else {
             Ok(EvalValue::Nil)
@@ -650,7 +655,9 @@ impl<'eval> Eval<'_> {
     fn eval_return(&mut self, ast: &Option<Box<AstExpr>>) -> EvalResult<EvalValue> {
         trace!("eval_return");
         if let Some(return_expr) = ast {
-            Ok(self.eval_expr(return_expr)?)
+            let val = self.eval_expr(return_expr)?;
+            trace!("eval_return: returning {val}");
+            Ok(EvalValue::Return(Box::new(val)))
         } else {
             Ok(EvalValue::Nil)
         }

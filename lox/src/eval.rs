@@ -284,7 +284,11 @@ impl<'eval> Eval<'_> {
             trace!("eval = {value}");
         }
 
-        Ok(value)
+        if let EvalValue::Return(v) = value {
+            Ok(*v)
+        } else {
+            Ok(value)
+        }
     }
 
     fn eval_ast(&mut self, ast: &'eval Ast) -> EvalResult<EvalValue> {
@@ -364,10 +368,20 @@ impl<'eval> Eval<'_> {
                 EvalValue::Number(_) => EvalValue::Boolean(false),
                 EvalValue::Boolean(v) => EvalValue::Boolean(!v),
                 EvalValue::Nil => EvalValue::Boolean(true),
+                EvalValue::Return(v) => match *v {
+                    EvalValue::Number(_) => EvalValue::Boolean(false),
+                    EvalValue::Boolean(v) => EvalValue::Boolean(!v),
+                    EvalValue::Nil => EvalValue::Boolean(true),
+                    _e => return Err(invalid_unary_op!(op, _e)),
+                },
                 _ => return Err(invalid_unary_op!(op, val)),
             },
             Lexeme::Minus => match val {
                 EvalValue::Number(v) => EvalValue::Number(-v),
+                EvalValue::Return(v) => match *v {
+                    EvalValue::Number(v) => EvalValue::Number(-v),
+                    _e => return Err(invalid_unary_op!(op, _e)),
+                },
                 _ => return Err(invalid_unary_op!(op, val)),
             },
             _ => return Err(invalid_unary_op!(op, val)),
@@ -389,54 +403,97 @@ impl<'eval> Eval<'_> {
             Lexeme::Plus => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l + r),
                 (EvalValue::String(l), EvalValue::String(r)) => EvalValue::String(l + &r),
-                /* TODO: I think this should be valid but not for CC
-                    (EvalValue::String(l), EvalValue::Number(r)) => {
-                        EvalValue::String(l + &r.to_string())
+                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
+                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l + r),
+                    (EvalValue::String(l), EvalValue::String(r)) => EvalValue::String(l + &r),
+                    _e => {
+                        trace!("bad + operands: left = {:?}, right = {:?}", _e.0, _e.1);
+                        return Err(EvalErrors::StringsOrNumbers(op.span.line()));
                     }
-                    (EvalValue::Number(l), EvalValue::String(r)) => {
-                        EvalValue::String(l.to_string() + &r)
-                    }
-                */
-                _ => return Err(EvalErrors::StringsOrNumbers(op.span.line())),
+                },
+                _e => {
+                    trace!("bad + operands: left = {:?}, right = {:?}", _e.0, _e.1);
+                    return Err(EvalErrors::StringsOrNumbers(op.span.line()));
+                }
             },
             Lexeme::Minus => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l - r),
+                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
+                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l - r),
+                    _ => return Err(invalid_binary_op!(op)),
+                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::Star => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l * r),
+                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
+                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l * r),
+                    _ => return Err(invalid_binary_op!(op)),
+                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::Slash => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l / r),
+                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
+                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l / r),
+                    _ => return Err(invalid_binary_op!(op)),
+                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::EqEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l == r),
                 (EvalValue::String(l), EvalValue::String(r)) => EvalValue::Boolean(l == r),
                 (EvalValue::Boolean(l), EvalValue::Boolean(r)) => EvalValue::Boolean(l == r),
+                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
+                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l == r),
+                    (EvalValue::String(l), EvalValue::String(r)) => EvalValue::Boolean(l == r),
+                    (EvalValue::Boolean(l), EvalValue::Boolean(r)) => EvalValue::Boolean(l == r),
+                    _ => return Err(invalid_binary_op!(op)),
+                },
                 _ => EvalValue::Boolean(false),
             },
             Lexeme::BangEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l != r),
                 (EvalValue::String(l), EvalValue::String(r)) => EvalValue::Boolean(l != r),
                 (EvalValue::Boolean(l), EvalValue::Boolean(r)) => EvalValue::Boolean(l != r),
+                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
+                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l != r),
+                    (EvalValue::String(l), EvalValue::String(r)) => EvalValue::Boolean(l != r),
+                    (EvalValue::Boolean(l), EvalValue::Boolean(r)) => EvalValue::Boolean(l != r),
+                    _ => return Err(invalid_binary_op!(op)),
+                },
                 _ => EvalValue::Boolean(true),
             },
             Lexeme::Less => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l < r),
+                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
+                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l < r),
+                    _ => return Err(invalid_binary_op!(op)),
+                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::LessEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l <= r),
+                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
+                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l <= r),
+                    _ => return Err(invalid_binary_op!(op)),
+                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::Greater => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l > r),
+                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
+                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l > r),
+                    _ => return Err(invalid_binary_op!(op)),
+                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::GreaterEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l >= r),
+                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
+                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l >= r),
+                    _ => return Err(invalid_binary_op!(op)),
+                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             _ => return Err(invalid_binary_op!(op)),
@@ -518,6 +575,7 @@ impl<'eval> Eval<'_> {
         match val {
             EvalValue::Boolean(b) => *b,
             EvalValue::Nil => false,
+            EvalValue::Return(v) => Eval::is_truthy(v),
             _ => true,
         }
     }
@@ -539,7 +597,11 @@ impl<'eval> Eval<'_> {
 
         guard.pop_scope(&mut self.state);
 
-        Ok(result)
+        if let EvalValue::Return(v) = result {
+            Ok(*v)
+        } else {
+            Ok(result)
+        }
     }
 
     fn eval_if_stmt(
@@ -573,10 +635,14 @@ impl<'eval> Eval<'_> {
         trace!("eval_while");
         loop {
             if Eval::is_truthy(&self.eval_expr(cond)?) {
-                match body {
+                let result = match body {
                     Ast::Block(asts) => self.eval_block(asts)?,
                     Ast::Statement(ast_stmt) => self.eval_stmt(ast_stmt)?,
                     _ => todo!("then block not block or statement"),
+                };
+
+                if let EvalValue::Return(_) = &result {
+                    return Ok(result);
                 }
             } else {
                 break;
@@ -605,7 +671,11 @@ impl<'eval> Eval<'_> {
             });
         };
 
-        Ok(val)
+        if let EvalValue::Return(v) = val {
+            Ok(*v)
+        } else {
+            Ok(val)
+        }
     }
 
     fn do_fn_call(&mut self, lox_func: &LoxFunction, args: &[AstExpr]) -> EvalResult<EvalValue> {

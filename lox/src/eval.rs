@@ -224,12 +224,41 @@ impl EvalState {
         false
     }
 
-    fn push(&mut self) {
+    fn push(&mut self) -> ScopeGuard {
+        trace!("push");
         self.env.push_front(EvalEnv::new());
+        ScopeGuard::new()
     }
 
     fn pop(&mut self) {
+        trace!("pop");
         self.env.pop_front();
+    }
+}
+
+struct ScopeGuard {
+    active: bool,
+}
+
+impl ScopeGuard {
+    fn new() -> Self {
+        ScopeGuard { active: true }
+    }
+
+    fn pop_scope(&mut self, state: &mut EvalState) {
+        if self.active {
+            state.pop();
+            self.active = false;
+        }
+    }
+}
+
+impl Drop for ScopeGuard {
+    fn drop(&mut self) {
+        if self.active {
+            // This should not happen in normal flow - it means we didn't properly clean up
+            eprintln!("Warning: ScopeGuard dropped without proper cleanup");
+        }
     }
 }
 
@@ -293,7 +322,7 @@ impl<'eval> Eval<'_> {
                 then,
                 or_else,
             } => self.eval_if_stmt(condition, then, or_else),
-            AstStmt::Return(_ast) => todo!("return stmts"),
+            AstStmt::Return(ast) => self.eval_return(ast),
             AstStmt::While(cond, body) => self.eval_while(cond, body),
         }
     }
@@ -510,38 +539,19 @@ impl<'eval> Eval<'_> {
 
     fn eval_block(&mut self, block: &[Ast]) -> EvalResult<EvalValue> {
         trace!("eval_block");
-        self.state.push();
 
-        // Use a closure to ensure pop() is always called
-        let result = (|| {
-            let mut value = EvalValue::Nil;
-            for ast in block {
-                value = self.eval_ast(ast)?;
+        let mut result = EvalValue::Nil;
+
+        let mut guard = self.state.push();
+        for ast in block {
+            result = self.eval_ast(ast)?;
+            if let Ast::Statement(AstStmt::Return(_)) = ast {
+                break;
             }
-            Ok(value)
-        })();
+        }
+        guard.pop_scope(&mut self.state);
 
-        self.state.pop();
-        result
-
-        // Alternative approach using RAII guard pattern for future reference:
-        //
-        // self.state.push();
-        //
-        // // Create a guard that will pop on drop
-        // struct ScopeGuard<'a>(&'a mut EvalState);
-        // impl Drop for ScopeGuard<'_> {
-        //     fn drop(&mut self) {
-        //         self.0.pop();
-        //     }
-        // }
-        // let _guard = ScopeGuard(&mut self.state);
-        //
-        // let mut result = EvalValue::Nil;
-        // for ast in block {
-        //     result = self.eval_ast(&ast)?;
-        // }
-        // Ok(result)
+        Ok(result)
     }
 
     fn eval_if_stmt(
@@ -589,10 +599,12 @@ impl<'eval> Eval<'_> {
     }
 
     fn eval_call(&mut self, func: &str, args: &[AstExpr], site: &Span) -> EvalResult<EvalValue> {
+        trace!("eval_call: {func}({args:?}) @ {site}");
+
         let lox_func = match self.state.lookup_lox_fn(func) {
             Some(value) => match value {
                 EvalValue::FunDecl(lox_function) => lox_function.clone(),
-                _ => todo!(),
+                _v => panic!("expected func_decl got {_v}"),
             },
             None => todo!("no such function at {site}"),
         };
@@ -611,8 +623,11 @@ impl<'eval> Eval<'_> {
     }
 
     fn do_fn_call(&mut self, lox_func: &LoxFunction, args: &[AstExpr]) -> EvalResult<EvalValue> {
+        trace!("do_fn_call({lox_func})");
+
         let mut vals = Vec::with_capacity(args.len());
         for arg in args {
+            trace!("do_fn_call: evaluating {arg}");
             let val = self.eval_expr(arg)?;
             vals.push(val.clone());
         }
@@ -620,21 +635,16 @@ impl<'eval> Eval<'_> {
         match &lox_func.fn_type {
             LoxFunctionType::System(system) => system(&vals),
             LoxFunctionType::UserDefined(body) => {
-                self.state.push();
+                trace!("calling UDF: {}", lox_func.name);
 
-                lox_func
-                    .params
-                    .iter()
-                    .flatten()
-                    .zip(vals)
-                    .for_each(|(p, i)| {
-                        self.state.add_var(p.to_string(), Some(i));
-                    });
+                let mut guard = self.state.push();
+
+                for (param, value) in lox_func.params.iter().flatten().zip(vals) {
+                    self.state.add_var(param.to_string(), Some(value));
+                }
 
                 let result = self.eval_ast(body);
-
-                self.state.pop();
-
+                guard.pop_scope(&mut self.state);
                 result
             }
         }
@@ -646,12 +656,23 @@ impl<'eval> Eval<'_> {
         params: &[String],
         body: &Ast,
     ) -> EvalResult<EvalValue> {
+        trace!("eval_fun_decl");
+
         self.state.add_lox_fn(LoxFunction {
             name: name.to_string(),
             params: Some(params.to_vec()),
             fn_type: LoxFunctionType::UserDefined((*body).clone()),
         });
         Ok(EvalValue::Nil)
+    }
+
+    fn eval_return(&mut self, ast: &Option<Box<AstExpr>>) -> EvalResult<EvalValue> {
+        trace!("eval_return");
+        if let Some(return_expr) = ast {
+            Ok(self.eval_expr(return_expr)?)
+        } else {
+            Ok(EvalValue::Nil)
+        }
     }
 }
 

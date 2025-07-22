@@ -114,8 +114,7 @@ impl Clone for LoxFunctionType {
 
 #[derive(Default)]
 struct EvalEnv {
-    vars: HashMap<String, EvalValue>,
-    fns: HashMap<String, EvalValue>,
+    env: HashMap<String, EvalValue>,
 }
 
 impl EvalEnv {
@@ -129,23 +128,19 @@ impl EvalEnv {
         } else {
             EvalValue::Nil
         };
-        self.vars.insert(id, init)
+        self.env.insert(id, init)
     }
 
     fn lookup_var(&self, id: &str) -> Option<&EvalValue> {
-        self.vars.get(id)
+        self.env.get(id)
     }
 
     fn lookup_var_mut(&mut self, id: &str) -> Option<&mut EvalValue> {
-        self.vars.get_mut(id)
+        self.env.get_mut(id)
     }
 
     fn add_fn(&mut self, func: LoxFunction) -> Option<EvalValue> {
-        self.fns.insert(func.name.clone(), EvalValue::FunDecl(func))
-    }
-
-    fn lookup_lox_fn(&self, id: String) -> Option<&EvalValue> {
-        self.fns.get(&id)
+        self.env.insert(func.name.clone(), EvalValue::FunDecl(func))
     }
 }
 
@@ -177,16 +172,6 @@ impl EvalState {
             .add_fn(func)
     }
 
-    fn lookup_lox_fn(&self, id: &str) -> Option<&EvalValue> {
-        for env in &self.env {
-            if env.fns.contains_key(id) {
-                return env.lookup_lox_fn(id.to_string());
-            }
-        }
-
-        None
-    }
-
     fn add_var(&mut self, id: String, initializer: Option<EvalValue>) -> Option<EvalValue> {
         self.env
             .front_mut()
@@ -196,7 +181,7 @@ impl EvalState {
 
     fn var_value(&self, id: &str) -> Option<&EvalValue> {
         for env in &self.env {
-            if env.vars.contains_key(id) {
+            if env.env.contains_key(id) {
                 return env.lookup_var(id);
             }
         }
@@ -206,7 +191,7 @@ impl EvalState {
 
     fn var_value_mut(&mut self, id: &str) -> Option<&mut EvalValue> {
         for env in &mut self.env {
-            if env.vars.contains_key(id) {
+            if env.env.contains_key(id) {
                 return env.lookup_var_mut(id);
             }
         }
@@ -216,7 +201,7 @@ impl EvalState {
 
     fn var_exists(&self, id: &str) -> bool {
         for env in &self.env {
-            if env.vars.contains_key(id) {
+            if env.env.contains_key(id) {
                 return true;
             }
         }
@@ -482,8 +467,6 @@ impl<'eval> Eval<'_> {
     fn eval_identifier(&self, id: &str) -> Option<&EvalValue> {
         if let Some(val) = self.state.var_value(id) {
             Some(val)
-        } else if let Some(func) = self.state.lookup_lox_fn(id) {
-            Some(func)
         } else {
             None
         }
@@ -601,12 +584,10 @@ impl<'eval> Eval<'_> {
     fn eval_call(&mut self, func: &str, args: &[AstExpr], site: &Span) -> EvalResult<EvalValue> {
         trace!("eval_call: {func}({args:?}) @ {site}");
 
-        let lox_func = match self.state.lookup_lox_fn(func) {
-            Some(value) => match value {
-                EvalValue::FunDecl(lox_function) => lox_function.clone(),
-                _v => panic!("expected func_decl got {_v}"),
-            },
-            None => todo!("no such function at {site}"),
+        let lox_func = if let Some(EvalValue::FunDecl(f)) = self.state.var_value(func) {
+            f.clone()
+        } else {
+            todo!("no such function {func} at {site}");
         };
 
         let val = if lox_func.arity() == args.len() {

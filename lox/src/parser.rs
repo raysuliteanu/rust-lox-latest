@@ -287,8 +287,21 @@ impl<'parser> Parser<'parser> {
         {
             let next_token = tokens.next().expect("peeked already");
             if let Lexeme::Identifier(i) = &next_token.lexeme {
+                trace!("adding param {i}");
                 params.push(i.clone());
-                self.check_for_comma(next_token, tokens)?;
+
+                match tokens.peek() {
+                    // identifier identifier
+                    Some(t) if matches!(t.lexeme, Lexeme::Identifier { .. }) => {
+                        return Err(ast_expected_token!(token t, Lexeme::Comma));
+                    }
+                    // identifier ','
+                    Some(t) if matches!(t.lexeme, Lexeme::Comma) => {
+                        tokens.next();
+                        continue;
+                    }
+                    Some(_) | None => continue,
+                }
             }
         }
 
@@ -297,22 +310,6 @@ impl<'parser> Parser<'parser> {
         assert_eq!(rparen.lexeme, Lexeme::RightParen);
 
         Ok(params)
-    }
-
-    fn check_for_comma(
-        &self,
-        prior_token: &Token,
-        tokens: &mut PeekableTokenIter,
-    ) -> ParseResult<()> {
-        if tokens.next_if(|t| t.lexeme == Lexeme::Comma).is_none()
-            && tokens.peek().is_some_and(|t| {
-                !matches!(t.lexeme, Lexeme::Identifier { .. } | Lexeme::RightParen)
-            })
-        {
-            return Err(ast_expected_token!(token prior_token, Lexeme::Comma));
-        }
-
-        Ok(())
     }
 
     // varDecl → "var" IDENTIFIER ( "=" expression )? ";" ;

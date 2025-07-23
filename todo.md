@@ -1,0 +1,8 @@
+# WIP
+
+- [ ] use proc macro to generate Rust functions for Lox UDF
+- [ ] proper 'return' handling; currently not able to return "early" all the way
+      up a call stack; see test/early_return.lox
+- [ ] handling closures and related returning functions; see test/closure.lox
+- [ ] see about impl From for EvalValue to e.g. go from
+      EvalValue::Number(10) -> 10

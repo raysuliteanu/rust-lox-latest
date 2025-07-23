@@ -30,7 +30,7 @@ impl Display for EvalValue {
             EvalValue::Boolean(b) => write!(f, "{b}"),
             EvalValue::Nil => write!(f, "nil"),
             EvalValue::FunDecl(func) => write!(f, "{func}"),
-            EvalValue::Return(value) => write!(f, "{value}"),
+            EvalValue::Return(value) => write!(f, "(return) {value}"),
         }
     }
 }
@@ -281,10 +281,11 @@ impl<'eval> Eval<'_> {
         let mut value = EvalValue::Nil;
         for ast in tree {
             value = self.eval_ast(ast)?;
-            trace!("eval = {value}");
+            trace!("eval: {value:?}");
         }
 
         if let EvalValue::Return(v) = value {
+            trace!("eval - got return: {}", *v);
             Ok(*v)
         } else {
             Ok(value)
@@ -368,20 +369,10 @@ impl<'eval> Eval<'_> {
                 EvalValue::Number(_) => EvalValue::Boolean(false),
                 EvalValue::Boolean(v) => EvalValue::Boolean(!v),
                 EvalValue::Nil => EvalValue::Boolean(true),
-                EvalValue::Return(v) => match *v {
-                    EvalValue::Number(_) => EvalValue::Boolean(false),
-                    EvalValue::Boolean(v) => EvalValue::Boolean(!v),
-                    EvalValue::Nil => EvalValue::Boolean(true),
-                    _e => return Err(invalid_unary_op!(op, _e)),
-                },
                 _ => return Err(invalid_unary_op!(op, val)),
             },
             Lexeme::Minus => match val {
                 EvalValue::Number(v) => EvalValue::Number(-v),
-                EvalValue::Return(v) => match *v {
-                    EvalValue::Number(v) => EvalValue::Number(-v),
-                    _e => return Err(invalid_unary_op!(op, _e)),
-                },
                 _ => return Err(invalid_unary_op!(op, val)),
             },
             _ => return Err(invalid_unary_op!(op, val)),
@@ -398,19 +389,13 @@ impl<'eval> Eval<'_> {
     ) -> EvalResult<EvalValue> {
         trace!("eval_binary");
         let left_expr = self.eval_expr(left)?;
+        trace!("eval_binary: left = {left_expr:?}");
         let right_expr = self.eval_expr(right)?;
+        trace!("eval_binary: right = {right_expr:?}");
         let result = match op.lexeme {
             Lexeme::Plus => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l + r),
                 (EvalValue::String(l), EvalValue::String(r)) => EvalValue::String(l + &r),
-                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
-                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l + r),
-                    (EvalValue::String(l), EvalValue::String(r)) => EvalValue::String(l + &r),
-                    _e => {
-                        trace!("bad + operands: left = {:?}, right = {:?}", _e.0, _e.1);
-                        return Err(EvalErrors::StringsOrNumbers(op.span.line()));
-                    }
-                },
                 _e => {
                     trace!("bad + operands: left = {:?}, right = {:?}", _e.0, _e.1);
                     return Err(EvalErrors::StringsOrNumbers(op.span.line()));
@@ -418,82 +403,42 @@ impl<'eval> Eval<'_> {
             },
             Lexeme::Minus => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l - r),
-                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
-                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l - r),
-                    _ => return Err(invalid_binary_op!(op)),
-                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::Star => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l * r),
-                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
-                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l * r),
-                    _ => return Err(invalid_binary_op!(op)),
-                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::Slash => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l / r),
-                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
-                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l / r),
-                    _ => return Err(invalid_binary_op!(op)),
-                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::EqEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l == r),
                 (EvalValue::String(l), EvalValue::String(r)) => EvalValue::Boolean(l == r),
                 (EvalValue::Boolean(l), EvalValue::Boolean(r)) => EvalValue::Boolean(l == r),
-                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
-                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l == r),
-                    (EvalValue::String(l), EvalValue::String(r)) => EvalValue::Boolean(l == r),
-                    (EvalValue::Boolean(l), EvalValue::Boolean(r)) => EvalValue::Boolean(l == r),
-                    _ => return Err(invalid_binary_op!(op)),
-                },
                 _ => EvalValue::Boolean(false),
             },
             Lexeme::BangEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l != r),
                 (EvalValue::String(l), EvalValue::String(r)) => EvalValue::Boolean(l != r),
                 (EvalValue::Boolean(l), EvalValue::Boolean(r)) => EvalValue::Boolean(l != r),
-                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
-                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l != r),
-                    (EvalValue::String(l), EvalValue::String(r)) => EvalValue::Boolean(l != r),
-                    (EvalValue::Boolean(l), EvalValue::Boolean(r)) => EvalValue::Boolean(l != r),
-                    _ => return Err(invalid_binary_op!(op)),
-                },
                 _ => EvalValue::Boolean(true),
             },
             Lexeme::Less => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l < r),
-                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
-                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l < r),
-                    _ => return Err(invalid_binary_op!(op)),
-                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::LessEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l <= r),
-                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
-                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l <= r),
-                    _ => return Err(invalid_binary_op!(op)),
-                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::Greater => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l > r),
-                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
-                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l > r),
-                    _ => return Err(invalid_binary_op!(op)),
-                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             Lexeme::GreaterEq => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l >= r),
-                (EvalValue::Return(l), EvalValue::Return(r)) => match (*l, *r) {
-                    (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Boolean(l >= r),
-                    _ => return Err(invalid_binary_op!(op)),
-                },
                 _ => return Err(invalid_binary_op!(op)),
             },
             _ => return Err(invalid_binary_op!(op)),
@@ -575,7 +520,6 @@ impl<'eval> Eval<'_> {
         match val {
             EvalValue::Boolean(b) => *b,
             EvalValue::Nil => false,
-            EvalValue::Return(v) => Eval::is_truthy(v),
             _ => true,
         }
     }
@@ -598,6 +542,7 @@ impl<'eval> Eval<'_> {
         guard.pop_scope(&mut self.state);
 
         if let EvalValue::Return(v) = result {
+            trace!("eval_block - got return: {}", *v);
             Ok(*v)
         } else {
             Ok(result)
@@ -638,7 +583,7 @@ impl<'eval> Eval<'_> {
                 let result = match body {
                     Ast::Block(asts) => self.eval_block(asts)?,
                     Ast::Statement(ast_stmt) => self.eval_stmt(ast_stmt)?,
-                    _ => todo!("then block not block or statement"),
+                    _ => panic!("then block not block or statement"),
                 };
 
                 if let EvalValue::Return(_) = &result {
@@ -658,7 +603,7 @@ impl<'eval> Eval<'_> {
         let lox_func = if let Some(EvalValue::FunDecl(f)) = self.state.var_value(func) {
             f.clone()
         } else {
-            todo!("no such function {func} at {site}");
+            panic!("no such function {func} at {site}");
         };
 
         let val = if lox_func.arity() == args.len() {
@@ -672,7 +617,16 @@ impl<'eval> Eval<'_> {
         };
 
         if let EvalValue::Return(v) = val {
-            Ok(*v)
+            trace!("eval_call - got return: {}", *v);
+            // due to recursion, could have nested EvalValue::Return,
+            // so extract the "root" EvalValue
+            let mut ret = v;
+            while let EvalValue::Return(v) = *ret {
+                trace!("eval_call - got return: {v}");
+                ret = v;
+            }
+
+            Ok(*ret)
         } else {
             Ok(val)
         }
@@ -682,10 +636,11 @@ impl<'eval> Eval<'_> {
         trace!("do_fn_call({lox_func})");
 
         let mut vals = Vec::with_capacity(args.len());
-        for arg in args {
-            trace!("do_fn_call: evaluating {arg}");
+        for (i, arg) in args.iter().enumerate() {
+            trace!("do_fn_call: evaluating arg{i}: {arg}");
             let val = self.eval_expr(arg)?;
             vals.push(val.clone());
+            trace!("do_fn_call: arg{i}: {arg} = {val}");
         }
 
         match &lox_func.fn_type {
@@ -724,13 +679,15 @@ impl<'eval> Eval<'_> {
 
     fn eval_return(&mut self, ast: &Option<Box<AstExpr>>) -> EvalResult<EvalValue> {
         trace!("eval_return");
-        if let Some(return_expr) = ast {
+        let ret_val = if let Some(return_expr) = ast {
             let val = self.eval_expr(return_expr)?;
-            trace!("eval_return: returning {val}");
-            Ok(EvalValue::Return(Box::new(val)))
+            EvalValue::Return(Box::new(val))
         } else {
-            Ok(EvalValue::Nil)
-        }
+            EvalValue::Nil
+        };
+
+        trace!("eval_return: returning {ret_val:?}");
+        Ok(EvalValue::Return(Box::new(ret_val)))
     }
 }
 

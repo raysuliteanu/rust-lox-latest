@@ -85,6 +85,7 @@ pub struct LoxFunction {
     name: String,
     params: Option<Vec<String>>,
     fn_type: LoxFunctionType,
+    state: Option<EvalState>,
 }
 
 impl LoxFunction {
@@ -114,9 +115,21 @@ impl Clone for LoxFunctionType {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default, Clone, PartialEq)]
 struct EvalEnv {
     env: HashMap<String, EvalValue>,
+}
+
+impl Display for EvalEnv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = self
+            .env
+            .iter()
+            .map(|(k, v)| format!("({k}, {v})"))
+            .collect::<Vec<String>>()
+            .join(", ");
+        write!(f, "{s}")
+    }
 }
 
 impl EvalEnv {
@@ -148,8 +161,18 @@ impl EvalEnv {
 
 type Stack<T> = VecDeque<T>;
 
+#[derive(Debug, Clone, PartialEq)]
 struct EvalState {
     env: Stack<EvalEnv>,
+}
+
+impl Display for EvalState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, e) in self.env.iter().enumerate() {
+            write!(f, "[{i}: {e}] ")?
+        }
+        Ok(())
+    }
 }
 
 impl EvalState {
@@ -159,6 +182,7 @@ impl EvalState {
             name: "clock".to_string(),
             params: None,
             fn_type: LoxFunctionType::System(func::clock),
+            state: None,
         });
 
         let mut env = Stack::new();
@@ -244,11 +268,12 @@ impl Drop for ScopeGuard {
     fn drop(&mut self) {
         if self.active {
             // This should not happen in normal flow - it means we didn't properly clean up
-            eprintln!("Warning: ScopeGuard dropped without proper cleanup");
+            panic!("ScopeGuard dropped without proper cleanup");
         }
     }
 }
 
+#[derive(Clone)]
 pub struct Eval<'eval> {
     source: &'eval str,
     expression_mode: bool,
@@ -597,23 +622,55 @@ impl<'eval> Eval<'_> {
         Ok(EvalValue::Nil)
     }
 
-    fn eval_call(&mut self, func: &str, args: &[AstExpr], site: &Span) -> EvalResult<EvalValue> {
-        trace!("eval_call: {func}({args:?}) @ {site}");
+    fn eval_call(&mut self, func_id: &str, args: &[AstExpr], site: &Span) -> EvalResult<EvalValue> {
+        trace!("eval_call: {func_id}({args:?}) @ {site}");
 
-        let lox_func = if let Some(EvalValue::FunDecl(f)) = self.state.var_value(func) {
-            f.clone()
-        } else {
-            panic!("no such function {func} at {site}");
-        };
+        // Get all function data we need in one immutable borrow
+        let (has_state, fn_type, params) =
+            if let Some(EvalValue::FunDecl(lox_func)) = self.state.var_value(func_id) {
+                if lox_func.arity() != args.len() {
+                    return Err(EvalErrors::ArityMismatch {
+                        expected: lox_func.arity(),
+                        actual: args.len(),
+                        line: site.line(),
+                    });
+                }
 
-        let val = if lox_func.arity() == args.len() {
-            self.do_fn_call(&lox_func, args)?
+                (
+                    lox_func.state.is_some(),
+                    lox_func.fn_type.clone(),
+                    lox_func.params.clone(),
+                )
+            } else {
+                panic!("no such function {func_id} at {site}");
+            };
+
+        let val = if has_state {
+            // Extract the state and swap it
+            let mut func_state =
+                if let Some(EvalValue::FunDecl(lox_func)) = self.state.var_value_mut(func_id) {
+                    lox_func
+                        .state
+                        .take()
+                        .expect("has_state was true but state is None")
+                } else {
+                    panic!("function {func_id} disappeared!");
+                };
+
+            std::mem::swap(&mut self.state, &mut func_state);
+
+            let result = self.do_fn_call(&fn_type, &params, args)?;
+
+            std::mem::swap(&mut self.state, &mut func_state);
+
+            // Put the state back
+            if let Some(EvalValue::FunDecl(lox_func)) = self.state.var_value_mut(func_id) {
+                lox_func.state = Some(func_state);
+            }
+
+            result
         } else {
-            return Err(EvalErrors::ArityMismatch {
-                expected: lox_func.arity(),
-                actual: args.len(),
-                line: site.line(),
-            });
+            self.do_fn_call(&fn_type, &params, args)?
         };
 
         if let EvalValue::Return(v) = val {
@@ -632,8 +689,13 @@ impl<'eval> Eval<'_> {
         }
     }
 
-    fn do_fn_call(&mut self, lox_func: &LoxFunction, args: &[AstExpr]) -> EvalResult<EvalValue> {
-        trace!("do_fn_call({lox_func})");
+    fn do_fn_call(
+        &mut self,
+        fn_type: &LoxFunctionType,
+        params: &Option<Vec<String>>,
+        args: &[AstExpr],
+    ) -> EvalResult<EvalValue> {
+        trace!("do_fn_call");
 
         let mut vals = Vec::with_capacity(args.len());
         for (i, arg) in args.iter().enumerate() {
@@ -643,14 +705,12 @@ impl<'eval> Eval<'_> {
             trace!("do_fn_call: arg{i}: {arg} = {val}");
         }
 
-        match &lox_func.fn_type {
+        match fn_type {
             LoxFunctionType::System(system) => system(&vals),
             LoxFunctionType::UserDefined(body) => {
-                trace!("calling UDF: {}", lox_func.name);
-
                 let mut guard = self.state.push();
 
-                for (param, value) in lox_func.params.iter().flatten().zip(vals) {
+                for (param, value) in params.iter().flatten().zip(vals) {
                     self.state.add_var(param.to_string(), Some(value));
                 }
 
@@ -668,11 +728,13 @@ impl<'eval> Eval<'_> {
         body: &Ast,
     ) -> EvalResult<EvalValue> {
         trace!("eval_fun_decl");
-
+        let curr_state = self.state.clone();
+        trace!("eval_fun_decl: saving state for {name}: {curr_state}");
         self.state.add_lox_fn(LoxFunction {
             name: name.to_string(),
             params: Some(params.to_vec()),
             fn_type: LoxFunctionType::UserDefined((*body).clone()),
+            state: Some(curr_state),
         });
         Ok(EvalValue::Nil)
     }

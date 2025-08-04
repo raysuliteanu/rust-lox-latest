@@ -40,6 +40,12 @@ impl From<(usize, usize, usize)> for Span {
 
 impl Display for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "line: {}, ({}, {})", self.line, self.offset, self.len)
+        write!(
+            f,
+            "line {} ({}:{})",
+            self.line,
+            self.offset,
+            self.offset + self.len
+        )
     }
 }

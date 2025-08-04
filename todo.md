@@ -5,6 +5,7 @@
       up a call stack; see test/early_return.lox
 - [x] handling closures and related returning functions; see test/closure.lox
 - [ ] handling currying; see test/curry.lox
-- [ ] handling higher order func; see test/square.lox
+- [ ] more currying/function stuff; see test/more_closure_stuff.lox
+- [x] handling higher order func; see test/square.lox
 - [ ] see about impl From for EvalValue to e.g. go from
       EvalValue::Number(10) -> 10

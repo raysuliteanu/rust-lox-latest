@@ -2,6 +2,7 @@ use anyhow::Result;
 use log::trace;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
+use std::mem;
 use thiserror::Error;
 
 use crate::func;
@@ -106,6 +107,15 @@ enum LoxFunctionType {
     UserDefined(Ast),
 }
 
+impl Display for LoxFunctionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoxFunctionType::System(s) => write!(f, "<system>: {s:?}"),
+            LoxFunctionType::UserDefined(ast) => write!(f, "{ast}"),
+        }
+    }
+}
+
 impl Clone for LoxFunctionType {
     fn clone(&self) -> Self {
         match self {
@@ -115,8 +125,6 @@ impl Clone for LoxFunctionType {
     }
 }
 
-type Stack<T> = VecDeque<T>;
-
 struct BlockScope;
 
 impl BlockScope {
@@ -124,36 +132,16 @@ impl BlockScope {
     where
         F: FnOnce(&mut Eval) -> R,
     {
-        eval.push();
+        eval.start_scope();
         let result = f(eval);
-        eval.pop();
+        eval.end_scope();
         result
     }
-}
-
-#[derive(Clone)]
-pub struct Eval<'eval> {
-    source: &'eval str,
-    expression_mode: bool,
-    global_env: EvalEnv,
-    env: Stack<EvalEnv>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
 struct EvalEnv {
     env: HashMap<String, EvalValue>,
-}
-
-impl Display for EvalEnv {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = self
-            .env
-            .iter()
-            .map(|(k, v)| format!("({k}, {v})"))
-            .collect::<Vec<String>>()
-            .join(", ");
-        write!(f, "{s}")
-    }
 }
 
 impl EvalEnv {
@@ -183,62 +171,26 @@ impl EvalEnv {
     }
 }
 
-impl<'eval> Eval<'eval> {
-    fn add_lox_fn(&mut self, func: LoxFunction) -> Option<EvalValue> {
-        if let Some(env) = self.env.front_mut() {
-            env.add_fn(func)
-        } else {
-            self.global_env.add_fn(func)
-        }
+impl Display for EvalEnv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let formated = self
+            .env
+            .iter()
+            .map(|(s, v)| format!("({s}: {v})"))
+            .collect::<Vec<String>>()
+            .join(", ");
+        write!(f, "Env({formated})")
     }
+}
 
-    fn add_var(&mut self, id: String, initializer: Option<EvalValue>) -> Option<EvalValue> {
-        if let Some(env) = self.env.front_mut() {
-            env.upsert_var(id, initializer)
-        } else {
-            self.global_env.upsert_var(id, initializer)
-        }
-    }
+type Stack<T> = VecDeque<T>;
 
-    fn var_value(&self, id: &str) -> Option<&EvalValue> {
-        for env in &self.env {
-            if env.env.contains_key(id) {
-                return env.lookup_var(id);
-            }
-        }
-
-        self.global_env.lookup_var(id)
-    }
-
-    fn var_value_mut(&mut self, id: &str) -> Option<&mut EvalValue> {
-        for env in &mut self.env {
-            if env.env.contains_key(id) {
-                return env.lookup_var_mut(id);
-            }
-        }
-
-        self.global_env.lookup_var_mut(id)
-    }
-
-    fn var_exists(&self, id: &str) -> bool {
-        for env in &self.env {
-            if env.env.contains_key(id) {
-                return true;
-            }
-        }
-
-        self.global_env.env.contains_key(id)
-    }
-
-    pub(crate) fn push(&mut self) {
-        trace!("push");
-        self.env.push_front(EvalEnv::new());
-    }
-
-    pub(crate) fn pop(&mut self) {
-        trace!("pop");
-        self.env.pop_front();
-    }
+#[derive(Clone)]
+pub struct Eval<'eval> {
+    source: &'eval str,
+    expression_mode: bool,
+    global_env: EvalEnv,
+    env: Stack<EvalEnv>,
 }
 
 impl<'eval> Eval<'_> {
@@ -257,6 +209,68 @@ impl<'eval> Eval<'_> {
             global_env,
             env: Stack::new(),
         }
+    }
+
+    fn add_lox_fn(&mut self, func: LoxFunction) -> Option<EvalValue> {
+        if let Some(env) = self.env.front_mut() {
+            env.add_fn(func)
+        } else {
+            self.global_env.add_fn(func)
+        }
+    }
+
+    fn add_var(&mut self, id: String, initializer: Option<EvalValue>) -> Option<EvalValue> {
+        if let Some(env) = self.env.front_mut() {
+            env.upsert_var(id, initializer)
+        } else {
+            self.global_env.upsert_var(id, initializer)
+        }
+    }
+
+    fn var_value(&self, id: &str) -> Option<&EvalValue> {
+        for env in &self.env {
+            trace!("var_value: looking for {id} in {env}");
+            if env.env.contains_key(id) {
+                trace!("var_value: found {id}");
+                return env.lookup_var(id);
+            }
+        }
+
+        trace!("var_value: looking for {id} in global env");
+        self.global_env.lookup_var(id)
+    }
+
+    fn var_value_mut(&mut self, id: &str) -> Option<&mut EvalValue> {
+        for env in &mut self.env {
+            trace!("var_value: looking for {id} in {env}");
+            if env.env.contains_key(id) {
+                trace!("var_value_mut: found {id}");
+                return env.lookup_var_mut(id);
+            }
+        }
+
+        trace!("var_value_mut: looking for {id} in global env");
+        self.global_env.lookup_var_mut(id)
+    }
+
+    fn var_exists(&self, id: &str) -> bool {
+        for env in &self.env {
+            if env.env.contains_key(id) {
+                return true;
+            }
+        }
+
+        self.global_env.env.contains_key(id)
+    }
+
+    pub(crate) fn start_scope(&mut self) {
+        trace!("start scope");
+        self.env.push_front(EvalEnv::new());
+    }
+
+    pub(crate) fn end_scope(&mut self) {
+        trace!("end scope");
+        self.env.pop_front();
     }
 
     pub fn evaluate(&mut self) -> anyhow::Result<EvalValue> {
@@ -589,11 +603,23 @@ impl<'eval> Eval<'_> {
     }
 
     fn eval_call(&mut self, func_id: &str, args: &[AstExpr], site: &Span) -> EvalResult<EvalValue> {
-        trace!("eval_call: {func_id}({args:?}) @ {site}");
+        trace!(
+            "eval_call: {func_id}({}) @ {site}",
+            args.iter()
+                .map(|a| format!("{a}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+
+        trace!(
+            "eval_call: env stack: {:?}, global env: {:?}",
+            self.env, self.global_env
+        );
 
         // Get all function data we need in one immutable borrow
         let (has_state, fn_type, params) =
             if let Some(EvalValue::FunDecl(lox_func)) = self.var_value(func_id) {
+                trace!("checking arity of {func_id}");
                 if lox_func.arity() != args.len() {
                     return Err(EvalErrors::ArityMismatch {
                         expected: lox_func.arity(),
@@ -612,7 +638,6 @@ impl<'eval> Eval<'_> {
             };
 
         let val = if has_state {
-            // Extract the state and swap it
             let mut func_state =
                 if let Some(EvalValue::FunDecl(lox_func)) = self.var_value_mut(func_id) {
                     lox_func
@@ -623,13 +648,12 @@ impl<'eval> Eval<'_> {
                     panic!("function {func_id} disappeared!");
                 };
 
-            std::mem::swap(&mut self.env, &mut func_state);
+            mem::swap(&mut self.env, &mut func_state);
 
             let result = self.do_fn_call(&fn_type, &params, args)?;
 
-            std::mem::swap(&mut self.env, &mut func_state);
+            mem::swap(&mut self.env, &mut func_state);
 
-            // Put the state back
             if let Some(EvalValue::FunDecl(lox_func)) = self.var_value_mut(func_id) {
                 lox_func.state = Some(func_state);
             }
@@ -639,7 +663,7 @@ impl<'eval> Eval<'_> {
             self.do_fn_call(&fn_type, &params, args)?
         };
 
-        if let EvalValue::Return(v) = val {
+        let result = if let EvalValue::Return(v) = val {
             trace!("eval_call - got return: {}", *v);
             // due to recursion, could have nested EvalValue::Return,
             // so extract the "root" EvalValue
@@ -649,10 +673,14 @@ impl<'eval> Eval<'_> {
                 ret = v;
             }
 
-            Ok(*ret)
+            *ret
         } else {
-            Ok(val)
-        }
+            val
+        };
+
+        trace!("eval_call: returning {result}");
+
+        Ok(result)
     }
 
     fn do_fn_call(
@@ -661,15 +689,12 @@ impl<'eval> Eval<'_> {
         params: &Option<Vec<String>>,
         args: &[AstExpr],
     ) -> EvalResult<EvalValue> {
-        trace!("do_fn_call");
-
         BlockScope::enter(self, |eval| {
             let mut vals = Vec::with_capacity(args.len());
             for (i, arg) in args.iter().enumerate() {
-                trace!("do_fn_call: evaluating arg{i}: {arg}");
                 let val = eval.eval_expr(arg)?;
-                vals.push(val.clone());
                 trace!("do_fn_call: arg{i}: {arg} = {val}");
+                vals.push(val.clone());
             }
 
             match fn_type {
@@ -679,6 +704,7 @@ impl<'eval> Eval<'_> {
                         eval.add_var(param.to_string(), Some(value));
                     }
 
+                    trace!("calling UDF {fn_type}");
                     eval.eval_ast(body)
                 }
             }
@@ -692,13 +718,18 @@ impl<'eval> Eval<'_> {
         body: &Ast,
     ) -> EvalResult<EvalValue> {
         trace!("eval_fun_decl");
-        let curr_state = self.env.clone();
-        trace!("eval_fun_decl: saving state for {name}: {curr_state:?}");
+        let state = if !self.env.is_empty() {
+            Some(self.env.clone())
+        } else {
+            None
+        };
+
+        trace!("eval_fun_decl: saving state for {name}: {state:?}");
         self.add_lox_fn(LoxFunction {
             name: name.to_string(),
             params: Some(params.to_vec()),
             fn_type: LoxFunctionType::UserDefined((*body).clone()),
-            state: Some(curr_state),
+            state,
         });
         Ok(EvalValue::Nil)
     }
@@ -1566,21 +1597,25 @@ mod tests {
     // Block Scoping Tests
     #[test]
     fn test_block_scoping_basic() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             var x = "outer";
             {
                 var x = "inner";
                 print x;
             }
             print x;
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_block_scoping_variable_shadowing() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             var x = 1;
             {
                 var x = 2;
@@ -1593,82 +1628,102 @@ mod tests {
                 print x;
             }
             print x;
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_block_scoping_undefined_after_block() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             {
                 var x = 42;
             }
             print x;
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_err());
     }
 
-    // Function Declaration and Call Tests  
+    // Function Declaration and Call Tests
     #[test]
     fn test_function_declaration_basic() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             fun greet(name) {
                 print "Hello, " + name;
             }
             greet("World");
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_function_with_no_parameters() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             fun getMessage() {
                 return "Hello, World!";
             }
             print getMessage();
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_function_with_multiple_parameters() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             fun add(a, b, c) {
                 return a + b + c;
             }
             print add(1, 2, 3);
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_function_parameter_scoping() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             var x = "global";
             fun test(x) {
                 return x;
             }
             print test("parameter");
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
 
-    #[test] 
+    #[test]
     fn test_function_closure_basic() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             var outer = "captured";
             fun testClosure() {
                 return outer;
             }
             print testClosure();
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
@@ -1683,31 +1738,38 @@ mod tests {
 
     #[test]
     fn test_function_arity_mismatch_too_few() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             fun test(a, b) {
                 return a + b;
             }
             test(1);
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_err());
     }
 
     #[test]
     fn test_function_arity_mismatch_too_many() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             fun test(a) {
                 return a;
             }
             test(1, 2, 3);
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_err());
     }
 
     #[test]
     fn test_recursive_function() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             fun factorial(n) {
                 if (n <= 1) {
                     return 1;
@@ -1715,7 +1777,9 @@ mod tests {
                 return n * factorial(n - 1);
             }
             print factorial(5);
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
@@ -1723,10 +1787,13 @@ mod tests {
     #[test]
     fn test_nested_function_calls() {
         // Skip this test if function declarations aren't fully implemented
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             var x = 5;
             print x;
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
@@ -1734,20 +1801,24 @@ mod tests {
     // Return Statement Tests
     #[test]
     fn test_return_statement_early_exit() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             fun earlyReturn() {
                 return "early";
                 return "late";
             }
             print earlyReturn();
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_return_statement_in_nested_block() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             fun nestedReturn(x) {
                 if (x > 0) {
                     return "positive";
@@ -1755,19 +1826,24 @@ mod tests {
                 return "non-positive";
             }
             print nestedReturn(5);
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_return_statement_without_value() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             fun voidReturn() {
                 return;
             }
             voidReturn();
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
@@ -1775,21 +1851,25 @@ mod tests {
     // Control Flow with Scoping Tests
     #[test]
     fn test_if_statement_with_scoping() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             var result = "none";
             if (true) {
                 var x = "if-block";
                 result = x;
             }
             print result;
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_while_statement_with_scoping() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             var i = 0;
             var sum = 0;
             while (i < 3) {
@@ -1798,14 +1878,17 @@ mod tests {
                 i = i + 1;
             }
             print sum;
-        "#, false);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_nested_blocks_with_scoping() {
-        let mut eval = Eval::new(r#"
+        let mut eval = Eval::new(
+            r#"
             var a = "outer";
             {
                 var a = "middle";
@@ -1816,7 +1899,41 @@ mod tests {
                 print a;
             }
             print a;
-        "#, false);
+        "#,
+            false,
+        );
+        let result = eval.evaluate();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_square() {
+        let mut eval = Eval::new(
+            r#"
+            fun square(x) {
+            return x * x;
+            }
+
+            // This higher-order function applies a
+            // function N times to a starting value x.
+            fun applyTimesN(N, f, x) {
+            var i = 0;
+            while (i < N) {
+                x = f(x);
+                i = i + 1;
+            }
+            return x;
+            }
+
+            // 6 is squared once
+            print applyTimesN(1, square, 6);
+            // 6 is squared twice
+            print applyTimesN(2, square, 6);
+            // 6 is squared thrice
+            print applyTimesN(3, square, 6);
+        "#,
+            false,
+        );
         let result = eval.evaluate();
         assert!(result.is_ok());
     }

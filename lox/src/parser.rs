@@ -763,7 +763,7 @@ impl<'parser> Parser<'parser> {
     // call → primary ( "(" arguments? ")" | "." IDENTIFIER )* ;
     // arguments → expression ( "," expression )* ;
     fn call(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
-        trace!("call");
+        trace!("call: {:?}", tokens.peek());
 
         let mut expr = self.primary(tokens)?;
 

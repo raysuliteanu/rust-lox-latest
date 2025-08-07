@@ -765,89 +765,58 @@ impl<'parser> Parser<'parser> {
     fn call(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
         trace!("call: {:?}", tokens.peek());
 
-        let mut expr = self.primary(tokens)?;
+        let primary = self.primary(tokens)?;
 
-        let result = match &expr {
+        let result = match &primary {
             AstExpr::Terminal(token) => match &token.lexeme {
-                Lexeme::Identifier(id) => match tokens.peek() {
-                    Some(_t) if _t.lexeme == Lexeme::LeftParen => {
-                        trace!("call: args start");
+                Lexeme::Identifier(id) => match tokens.peek().cloned() {
+                    Some(t) if t.lexeme == Lexeme::LeftParen => {
+                        trace!("is call");
                         let _open_paren = tokens.next();
+                        let args = self.parse_call_args(tokens)?;
+                        let call = ast_call_expression!((*id).clone(), args, t.span.clone());
+                        let _close_paren = tokens.next();
+                        // TODO: if next token is l_paren, we have chained called e.g. f(a)(b)(c)
 
-                        let mut args = vec![];
-
-                        // while not closing paren ...
-                        while let Some(t) = tokens.peek().cloned() {
-                            // if closing paren, then done with args processing
-                            if t.lexeme == Lexeme::RightParen {
-                                let _close_paren = tokens.next();
-                                expr = ast_call_expression!((*id).clone(), args, t.span.clone());
-                                trace!("call: args end");
-                                break;
-                            }
-
-                            let arg = self.expression(tokens)?;
-                            args.push(arg);
-
-                            // limit number of args to 256 (per Crafting Interpeters book, Ch 10)
-                            if args.len() >= MAX_FUNC_ARGS as usize {
-                                return Err(ParseError::TooManyFunctionArgs(t.span.line()));
-                            }
-
-                            if tokens.peek().is_some_and(|t| t.lexeme == Lexeme::Comma) {
-                                let _comma = tokens.next();
-                            }
-                        }
-
-                        expr
+                        call
                     }
-                    Some(_) | None => expr,
+                    Some(_) | None => primary,
                 },
-                _ => expr,
+                _ => primary,
             },
-            _ => expr,
+            _ => primary,
         };
 
         Ok(result)
+    }
 
-        // // if expr is an Identifier, (e.g. 'foo'), then if next is an open paren then this is a
-        // // call, otherewise just a normal expr
-        // let result = match tokens.peek() {
-        //     Some(_t) if _t.lexeme == Lexeme::LeftParen => {
-        //         trace!("call: args start");
-        //         let _open_paren = tokens.next();
-        //
-        //         let mut args = vec![];
-        //
-        //         // while not closing paren ...
-        //         while let Some(t) = tokens.peek().cloned() {
-        //             // if closing paren, then done with args processing
-        //             if t.lexeme == Lexeme::RightParen {
-        //                 let _close_paren = tokens.next();
-        //                 expr = ast_call_expression!(expr, args, t.span.clone());
-        //                 trace!("call: args end");
-        //                 break;
-        //             }
-        //
-        //             let arg = self.expression(tokens)?;
-        //             args.push(arg);
-        //
-        //             // limit number of args to 256 (per Crafting Interpeters book, Ch 10)
-        //             if args.len() >= MAX_FUNC_ARGS as usize {
-        //                 return Err(ParseError::TooManyFunctionArgs(t.span.line()));
-        //             }
-        //
-        //             if tokens.peek().is_some_and(|t| t.lexeme == Lexeme::Comma) {
-        //                 let _comma = tokens.next();
-        //             }
-        //         }
-        //         expr
-        //     }
-        //     Some(_) => expr,
-        //     None => return Err(ParseError::UnexpectedEof),
-        // };
-        //
-        // Ok(result)
+    fn parse_call_args(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Vec<AstExpr>> {
+        trace!("parse_call_args");
+
+        let mut args = vec![];
+
+        // while not closing paren ...
+        while let Some(t) = tokens.peek().cloned() {
+            // if closing paren, then done with args processing
+            if t.lexeme == Lexeme::RightParen {
+                trace!("parse_call_args: args end");
+                break;
+            }
+
+            let arg = self.expression(tokens)?;
+            args.push(arg);
+
+            // limit number of args to 256 (per Crafting Interpeters book, Ch 10)
+            if args.len() >= MAX_FUNC_ARGS as usize {
+                return Err(ParseError::TooManyFunctionArgs(t.span.line()));
+            }
+
+            if tokens.peek().is_some_and(|t| t.lexeme == Lexeme::Comma) {
+                let _comma = tokens.next();
+            }
+        }
+
+        Ok(args)
     }
 
     // primary → "true" | "false" | "nil" | "this"

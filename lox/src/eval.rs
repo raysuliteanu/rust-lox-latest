@@ -13,7 +13,7 @@ use crate::span::Span;
 
 pub type Callable = fn(&[EvalValue]) -> EvalResult<EvalValue>;
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EvalValue {
     Return(Box<EvalValue>),
     FunDecl(LoxFunction),
@@ -101,9 +101,9 @@ impl Display for LoxFunction {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum LoxFunctionType {
-    System(Callable),
+    System(&'static str),
     UserDefined(Ast),
 }
 
@@ -112,15 +112,6 @@ impl Display for LoxFunctionType {
         match self {
             LoxFunctionType::System(s) => write!(f, "<system>: {s:?}"),
             LoxFunctionType::UserDefined(ast) => write!(f, "{ast}"),
-        }
-    }
-}
-
-impl Clone for LoxFunctionType {
-    fn clone(&self) -> Self {
-        match self {
-            LoxFunctionType::System(callable) => LoxFunctionType::System(*callable),
-            LoxFunctionType::UserDefined(ast) => LoxFunctionType::UserDefined(ast.clone()),
         }
     }
 }
@@ -191,23 +182,28 @@ pub struct Eval<'eval> {
     expression_mode: bool,
     global_env: EvalEnv,
     env: Stack<EvalEnv>,
+    global_fns: HashMap<&'static str, Callable>,
 }
 
 impl<'eval> Eval<'_> {
-    pub fn new(source: &str, expression_mode: bool) -> Eval {
+    pub fn new(source: &str, expression_mode: bool) -> Eval<'_> {
         let mut global_env = EvalEnv::new();
         global_env.add_fn(LoxFunction {
             name: "clock".to_string(),
             params: None,
-            fn_type: LoxFunctionType::System(func::clock),
+            fn_type: LoxFunctionType::System("clock"),
             state: None,
         });
+
+        let mut global_fns: HashMap<&'static str, Callable> = HashMap::new();
+        global_fns.insert("clock", func::clock);
 
         Eval {
             source,
             expression_mode,
             global_env,
             env: Stack::new(),
+            global_fns,
         }
     }
 
@@ -698,7 +694,7 @@ impl<'eval> Eval<'_> {
             }
 
             match fn_type {
-                LoxFunctionType::System(system) => system(&vals),
+                LoxFunctionType::System(name) => eval.call_system_fn(name, &vals),
                 LoxFunctionType::UserDefined(body) => {
                     for (param, value) in params.iter().flatten().zip(vals) {
                         eval.add_var(param.to_string(), Some(value));
@@ -709,6 +705,18 @@ impl<'eval> Eval<'_> {
                 }
             }
         })
+    }
+
+    fn call_system_fn(
+        &mut self,
+        name: &'static str,
+        params: &[EvalValue],
+    ) -> EvalResult<EvalValue> {
+        if let Some(func) = self.global_fns.get(name) {
+            (*func)(params)
+        } else {
+            panic!("missing system function {name}");
+        }
     }
 
     fn eval_fun_decl(

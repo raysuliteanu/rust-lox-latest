@@ -35,9 +35,9 @@ pub enum ParseError {
 pub type ParseResult<T> = Result<T, ParseError>;
 
 macro_rules! ast_call_expression {
-    ($id: expr, $args: expr, $site: expr) => {
+    ($callee: expr, $args: expr, $site: expr) => {
         crate::model::AstExpr::Call {
-            func: $id,
+            callee: Box::new($callee),
             args: $args,
             site: $site,
         }
@@ -765,29 +765,23 @@ impl<'parser> Parser<'parser> {
     fn call(&self, tokens: &mut PeekableTokenIter) -> ParseResult<AstExpr> {
         trace!("call: {:?}", tokens.peek());
 
-        let primary = self.primary(tokens)?;
+        let mut expr = self.primary(tokens)?;
 
-        let result = match &primary {
-            AstExpr::Terminal(token) => match &token.lexeme {
-                Lexeme::Identifier(id) => match tokens.peek().cloned() {
-                    Some(t) if t.lexeme == Lexeme::LeftParen => {
-                        trace!("is call");
-                        let _open_paren = tokens.next();
-                        let args = self.parse_call_args(tokens)?;
-                        let call = ast_call_expression!((*id).clone(), args, t.span.clone());
-                        let _close_paren = tokens.next();
-                        // TODO: if next token is l_paren, we have chained called e.g. f(a)(b)(c)
-
-                        call
-                    }
-                    Some(_) | None => primary,
-                },
-                _ => primary,
+        match tokens.peek().cloned() {
+            Some(token) if token.lexeme == Lexeme::LeftParen => loop {
+                trace!("is call");
+                let _open_paren = tokens.next();
+                let args = self.parse_call_args(tokens)?;
+                expr = ast_call_expression!(expr, args, token.span.clone());
+                if tokens.peek().is_some_and(|t| t.lexeme != Lexeme::LeftParen) {
+                    break;
+                }
             },
-            _ => primary,
-        };
+            Some(token) if token.lexeme == Lexeme::Dot => todo!("call.identifier"),
+            _ => {} // don't care
+        }
 
-        Ok(result)
+        Ok(expr)
     }
 
     fn parse_call_args(&self, tokens: &mut PeekableTokenIter) -> ParseResult<Vec<AstExpr>> {
@@ -800,6 +794,7 @@ impl<'parser> Parser<'parser> {
             // if closing paren, then done with args processing
             if t.lexeme == Lexeme::RightParen {
                 trace!("parse_call_args: args end");
+                let _close_paren = tokens.next();
                 break;
             }
 
@@ -1321,7 +1316,9 @@ mod tests {
             AstExpr::Terminal(create_token(Lexeme::String("hello".to_string()))),
         ];
         let call = AstExpr::Call {
-            func: "foo".to_string(),
+            callee: Box::new(AstExpr::Terminal(create_token(Lexeme::Identifier(
+                "foo".to_string(),
+            )))),
             args,
             site: Span::new(1, 0, 1),
         };
@@ -1331,7 +1328,9 @@ mod tests {
     #[test]
     fn test_ast_display_call_no_args() {
         let call = AstExpr::Call {
-            func: "foo".to_string(),
+            callee: Box::new(AstExpr::Terminal(create_token(Lexeme::Identifier(
+                "foo".to_string(),
+            )))),
             args: vec![],
             site: Span::new(1, 0, 1),
         };
@@ -1345,14 +1344,18 @@ mod tests {
             5.0,
         )))];
         let inner_call = AstExpr::Call {
-            func: "bar".to_string(),
+            callee: Box::new(AstExpr::Terminal(create_token(Lexeme::Identifier(
+                "bar".to_string(),
+            )))),
             args: inner_args,
             site: Span::new(1, 0, 1),
         };
 
         let outer_args = vec![inner_call];
         let outer_call = AstExpr::Call {
-            func: "foo".to_string(),
+            callee: Box::new(AstExpr::Terminal(create_token(Lexeme::Identifier(
+                "foo".to_string(),
+            )))),
             args: outer_args,
             site: Span::new(1, 0, 1),
         };
@@ -1372,7 +1375,7 @@ mod tests {
         match &ast[0] {
             Ast::Statement(AstStmt::Expression(expr)) => match expr {
                 AstExpr::Call {
-                    func: _,
+                    callee: _,
                     args,
                     site: _,
                 } => {

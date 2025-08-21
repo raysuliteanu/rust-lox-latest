@@ -301,7 +301,6 @@ pub enum Ast {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum AstStmt {
-    // condition, then, else
     If {
         condition: Box<AstExpr>,
         then: Box<Ast>,
@@ -317,7 +316,7 @@ pub enum AstStmt {
 #[derive(Debug, PartialEq, Clone)]
 pub enum AstExpr {
     Call {
-        func: String,
+        callee: Box<AstExpr>,
         args: Vec<AstExpr>,
         site: Span,
     },
@@ -325,7 +324,7 @@ pub enum AstExpr {
         id: String,
         expr: Box<AstExpr>,
     },
-    // expr AND/OR expr
+    // left AND/OR right
     Logical {
         op: Token,
         left: Box<AstExpr>,
@@ -380,7 +379,7 @@ impl Display for AstExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AstExpr::Call {
-                func: id,
+                callee,
                 args,
                 site: _,
             } => {
@@ -389,7 +388,7 @@ impl Display for AstExpr {
                     .map(|arg| arg.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "{id}([{args_str}])")
+                write!(f, "{callee}([{args_str}])")
             }
             AstExpr::Assignment { id, expr } => write!(f, "{id} = {expr}"),
             AstExpr::Logical { op, left, right } => {
@@ -442,7 +441,8 @@ fn print_ast_token(token: &Token) -> String {
         | Lexeme::Less
         | Lexeme::Greater
         | Lexeme::Slash => token.lexeme.lexeme_str().to_string(),
-        Lexeme::Identifier(v) | Lexeme::String(v) => v.to_lowercase(),
+        Lexeme::Identifier(v) | Lexeme::String(v) => v.to_string(),
+        // Lexeme::Identifier(v) | Lexeme::String(v) => v.to_lowercase(),
         Lexeme::Number(_, v) => {
             if *v == v.trunc() {
                 format!("{v}.0")

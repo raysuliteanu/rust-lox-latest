@@ -642,32 +642,7 @@ impl<'eval> Eval<'_> {
                         let (has_state, fn_type, params) =
                             self.extract_fn_details(callee, args, site, id)?;
 
-                        let val = if has_state {
-                            let mut func_state =
-                                if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&f.name) {
-                                    f.state
-                                        .take()
-                                        .expect("has_state was true but state is None")
-                                } else {
-                                    panic!("function {callee} disappeared!");
-                                };
-
-                            mem::swap(&mut self.env, &mut func_state);
-
-                            let result = self.do_fn_call(&fn_type, &params, args)?;
-
-                            mem::swap(&mut self.env, &mut func_state);
-
-                            if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&f.name) {
-                                f.state = Some(func_state);
-                            }
-
-                            result
-                        } else {
-                            self.do_fn_call(&fn_type, &params, args)?
-                        };
-
-                        Self::extract_return_val(val)
+                        self.finish_call(f.name, args, has_state, fn_type, params)?
                     }
                     _v => panic!("eval_call: not a function: {_v}"),
                 };
@@ -692,32 +667,7 @@ impl<'eval> Eval<'_> {
                     let (has_state, fn_type, params) =
                         self.extract_fn_details(callee, args, site, &f.name)?;
 
-                    let val = if has_state {
-                        let mut func_state =
-                            if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&f.name) {
-                                f.state
-                                    .take()
-                                    .expect("has_state was true but state is None")
-                            } else {
-                                panic!("function {callee} disappeared!");
-                            };
-
-                        mem::swap(&mut self.env, &mut func_state);
-
-                        let result = self.do_fn_call(&fn_type, &params, args)?;
-
-                        mem::swap(&mut self.env, &mut func_state);
-
-                        if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&f.name) {
-                            f.state = Some(func_state);
-                        }
-
-                        result
-                    } else {
-                        self.do_fn_call(&fn_type, &params, args)?
-                    };
-
-                    Self::extract_return_val(val)
+                    self.finish_call(f.name, args, has_state, fn_type, params)?
                 }
                 _v => panic!("eval_call: not a function: {_v}"),
             }
@@ -726,6 +676,41 @@ impl<'eval> Eval<'_> {
         trace!("eval_call: returning {result}");
 
         Ok(result.clone())
+    }
+
+    fn finish_call(
+        &mut self,
+        fn_name: String,
+        args: &[AstExpr],
+        has_state: bool,
+        fn_type: LoxFunctionType,
+        params: Option<Vec<String>>,
+    ) -> EvalResult<EvalValue> {
+        let val = if has_state {
+            let mut func_state = if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&fn_name) {
+                f.state
+                    .take()
+                    .expect("has_state was true but state is None")
+            } else {
+                panic!("function {fn_name} disappeared!");
+            };
+
+            mem::swap(&mut self.env, &mut func_state);
+
+            let result = self.do_fn_call(&fn_type, &params, args)?;
+
+            mem::swap(&mut self.env, &mut func_state);
+
+            if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&fn_name) {
+                f.state = Some(func_state);
+            }
+
+            result
+        } else {
+            self.do_fn_call(&fn_type, &params, args)?
+        };
+
+        Ok(Self::extract_return_val(val))
     }
 
     fn extract_return_val(val: EvalValue) -> EvalValue {

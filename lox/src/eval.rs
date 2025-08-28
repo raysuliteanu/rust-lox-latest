@@ -714,7 +714,7 @@ impl<'eval> Eval<'_> {
     }
 
     fn extract_return_val(val: EvalValue) -> EvalValue {
-        let result = if let EvalValue::Return(r) = val {
+        if let EvalValue::Return(r) = val {
             let mut ret = *r;
             while let EvalValue::Return(v) = ret {
                 trace!("eval_call - got return: {v}");
@@ -724,9 +724,7 @@ impl<'eval> Eval<'_> {
             ret
         } else {
             val
-        };
-
-        result
+        }
     }
 
     fn extract_fn_details(

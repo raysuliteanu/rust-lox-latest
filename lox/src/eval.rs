@@ -1,7 +1,7 @@
 use anyhow::Result;
 use log::trace;
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
 use std::mem;
 use std::sync::Arc;
@@ -12,33 +12,10 @@ use crate::model::{Ast, AstExpr, AstStmt};
 use crate::model::{Lexeme, Token};
 use crate::parser::Parser;
 use crate::span::Span;
+use crate::util::StringInterner;
 
 pub type Callable = fn(&[EvalValue]) -> EvalResult<EvalValue>;
-
-/// String interner using Arc<str> for thread-safe string sharing
-#[derive(Debug, Clone, Default)]
-struct StringInterner {
-    strings: HashSet<Arc<str>>,
-}
-
-impl StringInterner {
-    fn new() -> Self {
-        StringInterner {
-            strings: HashSet::new(),
-        }
-    }
-
-    fn intern(&mut self, s: &str) -> Arc<str> {
-        if let Some(existing) = self.strings.get(s) {
-            existing.clone()
-        } else {
-            let arc_str: Arc<str> = s.into();
-            self.strings.insert(arc_str.clone());
-            arc_str
-        }
-    }
-}
-
+type FnDetails = (bool, LoxFunctionType, Option<Vec<Arc<str>>>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EvalValue {
@@ -217,7 +194,7 @@ impl<'eval> Eval<'_> {
     pub fn new(source: &str, expression_mode: bool) -> Eval<'_> {
         let mut interner = StringInterner::new();
         let mut global_env = EvalEnv::new();
-        
+
         let clock_name = interner.intern("clock");
         global_env.add_fn(LoxFunction {
             name: clock_name,
@@ -303,7 +280,7 @@ impl<'eval> Eval<'_> {
     }
 
     pub fn evaluate(&mut self) -> anyhow::Result<EvalValue> {
-        let parser = Parser::new(self.source, self.expression_mode, false);
+        let mut parser = Parser::new(self.source, self.expression_mode, false);
         let tree = parser.parse()?;
 
         match self.eval(tree.iter()) {
@@ -715,7 +692,7 @@ impl<'eval> Eval<'_> {
         params: Option<Vec<Arc<str>>>,
     ) -> EvalResult<EvalValue> {
         let val = if has_state {
-            let mut func_state = if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&fn_name) {
+            let mut func_state = if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(fn_name) {
                 f.state
                     .take()
                     .expect("has_state was true but state is None")
@@ -729,7 +706,7 @@ impl<'eval> Eval<'_> {
 
             mem::swap(&mut self.env, &mut func_state);
 
-            if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&fn_name) {
+            if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(fn_name) {
                 f.state = Some(func_state);
             }
 
@@ -761,7 +738,7 @@ impl<'eval> Eval<'_> {
         args: &[AstExpr],
         site: &Span,
         id: &str,
-    ) -> EvalResult<(bool, LoxFunctionType, Option<Vec<Arc<str>>>)> {
+    ) -> EvalResult<FnDetails> {
         let (has_state, fn_type, params) =
             if let Some(EvalValue::FunDecl(lox_func)) = self.var_value(id) {
                 trace!("checking arity of {callee}");
@@ -839,9 +816,8 @@ impl<'eval> Eval<'_> {
         };
 
         let interned_name = self.interner.intern(name);
-        let interned_params: Vec<Arc<str>> = params.iter()
-            .map(|p| self.interner.intern(p))
-            .collect();
+        let interned_params: Vec<Arc<str>> =
+            params.iter().map(|p| self.interner.intern(p)).collect();
 
         trace!("eval_fun_decl: saving state for {name}: {state:?}");
         self.add_lox_fn(LoxFunction {
@@ -873,17 +849,17 @@ mod tests {
     use super::*;
     use crate::span::Span;
     use crate::util::print_ast;
-    
+
     fn string_val(s: &str) -> EvalValue {
         EvalValue::String(Cow::Owned(s.to_string()))
     }
-    
+
     #[test]
     fn test_thread_safety() {
         // Test that EvalValue implements Send + Sync (required for anyhow::Error compatibility)
         fn assert_send<T: Send>() {}
         fn assert_sync<T: Sync>() {}
-        
+
         assert_send::<EvalValue>();
         assert_sync::<EvalValue>();
         assert_send::<EvalErrors>();
@@ -898,20 +874,20 @@ mod tests {
             if (n <= 1) return n;
             return fibonacci(n - 1) + fibonacci(n - 2);
         }
-        
+
         var x = 5;
         var y = 10;
         var result = fibonacci(x);
         print result;
         "#;
-        
+
         let mut eval = Eval::new(program, false);
-        
+
         // Verify the interner has some common strings
-        let interner_before = eval.interner.strings.len();
+        let interner_before = eval.interner.len();
         let _ = eval.evaluate(); // May fail due to recursion, but should populate interner
-        let interner_after = eval.interner.strings.len();
-        
+        let interner_after = eval.interner.len();
+
         // Should have interned at least function names, variable names
         assert!(interner_after >= interner_before);
     }
@@ -920,10 +896,7 @@ mod tests {
     fn test_eval_value_display() {
         assert_eq!(format!("{}", EvalValue::Number(42.0)), "42");
         assert_eq!(format!("{}", EvalValue::Number(1.23)), "1.23");
-        assert_eq!(
-            format!("{}", string_val("hello")),
-            "hello"
-        );
+        assert_eq!(format!("{}", string_val("hello")), "hello");
         assert_eq!(format!("{}", EvalValue::Boolean(true)), "true");
         assert_eq!(format!("{}", EvalValue::Boolean(false)), "false");
         assert_eq!(format!("{}", EvalValue::Nil), "nil");
@@ -932,18 +905,12 @@ mod tests {
     #[test]
     fn test_eval_value_equality() {
         assert_eq!(EvalValue::Number(42.0), EvalValue::Number(42.0));
-        assert_eq!(
-            string_val("test"),
-            string_val("test")
-        );
+        assert_eq!(string_val("test"), string_val("test"));
         assert_eq!(EvalValue::Boolean(true), EvalValue::Boolean(true));
         assert_eq!(EvalValue::Nil, EvalValue::Nil);
 
         assert_ne!(EvalValue::Number(42.0), EvalValue::Number(43.0));
-        assert_ne!(
-            string_val("test"),
-            string_val("other")
-        );
+        assert_ne!(string_val("test"), string_val("other"));
         assert_ne!(EvalValue::Boolean(true), EvalValue::Boolean(false));
     }
 
@@ -1732,7 +1699,7 @@ mod tests {
     #[test]
     fn test_print_ast_simple() {
         let source = "var x = 42; print x;";
-        let parser = Parser::new(source, false, false);
+        let mut parser = Parser::new(source, false, false);
         let ast = parser.parse().unwrap();
 
         // This would print to stdout, so we just verify it doesn't panic
@@ -1749,7 +1716,7 @@ mod tests {
             print "small";
         }
         "#;
-        let parser = Parser::new(source, false, false);
+        let mut parser = Parser::new(source, false, false);
         let ast = parser.parse().unwrap();
 
         // This would print to stdout, so we just verify it doesn't panic

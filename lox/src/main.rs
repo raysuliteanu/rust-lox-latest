@@ -65,7 +65,7 @@ fn main() -> Result<ExitCode> {
             pretty_print,
         } => {
             let source = get_source(filename)?;
-            let parser = parser::ParserBuilder::new(&source)
+            let mut parser = parser::ParserBuilder::new(&source)
                 .expression_mode(!no_expression_mode)
                 .pretty_print(pretty_print)
                 .build();

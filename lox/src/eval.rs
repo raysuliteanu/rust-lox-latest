@@ -350,13 +350,9 @@ impl<'eval> Eval<'_> {
         let val = match &token.lexeme {
             Lexeme::Number(_, v) => EvalValue::Number(*v),
             Lexeme::String(s) => EvalValue::String(s.to_string()),
-            Lexeme::Identifier(id) => {
-                if let Some(value) = self.eval_identifier(id) {
-                    value.clone()
-                } else {
-                    return Err(EvalErrors::UndefinedVar(id.clone(), token.span.line()));
-                }
-            }
+            Lexeme::Identifier(id) => self
+                .eval_identifier(id)
+                .ok_or_else(|| EvalErrors::UndefinedVar(id.clone(), token.span.line()))?,
             Lexeme::True => EvalValue::Boolean(true),
             Lexeme::False => EvalValue::Boolean(false),
             Lexeme::Nil => EvalValue::Nil,
@@ -473,12 +469,8 @@ impl<'eval> Eval<'_> {
         Ok(EvalValue::Nil)
     }
 
-    fn eval_identifier(&self, id: &str) -> Option<&EvalValue> {
-        if let Some(val) = self.var_value(id) {
-            Some(val)
-        } else {
-            None
-        }
+    fn eval_identifier(&self, id: &str) -> Option<EvalValue> {
+        self.var_value(id).cloned()
     }
 
     // some_var = expr
@@ -490,8 +482,8 @@ impl<'eval> Eval<'_> {
             let val = self
                 .var_value_mut(id)
                 .expect("already checked the var exists");
-            *val = new_val;
-            Ok(val.clone())
+            *val = new_val.clone();
+            Ok(new_val)
         }
     }
 
@@ -761,24 +753,26 @@ impl<'eval> Eval<'_> {
         params: &Option<Vec<String>>,
         args: &[AstExpr],
     ) -> EvalResult<EvalValue> {
-        BlockScope::enter(self, |eval| {
-            let mut vals = Vec::with_capacity(args.len());
-            for (i, arg) in args.iter().enumerate() {
-                let val = eval.eval_expr(arg)?;
-                trace!("do_fn_call: arg{i}: {arg} = {val}");
-                vals.push(val.clone());
+        BlockScope::enter(self, |eval| match fn_type {
+            LoxFunctionType::System(name) => {
+                let vals: Result<Vec<_>, _> = args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, arg)| {
+                        let val = eval.eval_expr(arg)?;
+                        trace!("do_fn_call: arg{i}: {arg} = {val}");
+                        Ok(val)
+                    })
+                    .collect();
+                eval.call_system_fn(name, &vals?)
             }
-
-            match fn_type {
-                LoxFunctionType::System(name) => eval.call_system_fn(name, &vals),
-                LoxFunctionType::UserDefined(body) => {
-                    for (param, value) in params.iter().flatten().zip(vals) {
-                        eval.add_var(param.to_string(), Some(value));
-                    }
-
-                    trace!("calling UDF {fn_type}");
-                    eval.eval_ast(body)
+            LoxFunctionType::UserDefined(body) => {
+                for (param, arg) in params.iter().flatten().zip(args) {
+                    let val = eval.eval_expr(arg)?;
+                    eval.add_var(param.to_string(), Some(val));
                 }
+                trace!("calling UDF {fn_type}");
+                eval.eval_ast(body)
             }
         })
     }

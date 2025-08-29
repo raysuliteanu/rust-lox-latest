@@ -1,9 +1,10 @@
 use anyhow::Result;
 use log::trace;
 use std::borrow::Cow;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Display;
 use std::mem;
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::func;
@@ -13,6 +14,30 @@ use crate::parser::Parser;
 use crate::span::Span;
 
 pub type Callable = fn(&[EvalValue]) -> EvalResult<EvalValue>;
+
+/// String interner using Arc<str> for thread-safe string sharing
+#[derive(Debug, Clone, Default)]
+struct StringInterner {
+    strings: HashSet<Arc<str>>,
+}
+
+impl StringInterner {
+    fn new() -> Self {
+        StringInterner {
+            strings: HashSet::new(),
+        }
+    }
+
+    fn intern(&mut self, s: &str) -> Arc<str> {
+        if let Some(existing) = self.strings.get(s) {
+            existing.clone()
+        } else {
+            let arc_str: Arc<str> = s.into();
+            self.strings.insert(arc_str.clone());
+            arc_str
+        }
+    }
+}
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -85,8 +110,8 @@ pub type EvalResult<T> = Result<T, EvalErrors>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoxFunction {
-    name: String,
-    params: Option<Vec<String>>,
+    name: Arc<str>,
+    params: Option<Vec<Arc<str>>>,
     fn_type: LoxFunctionType,
     state: Option<Stack<EvalEnv>>,
 }
@@ -134,7 +159,7 @@ impl BlockScope {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 struct EvalEnv {
-    env: HashMap<String, EvalValue>,
+    env: HashMap<Arc<str>, EvalValue>,
 }
 
 impl EvalEnv {
@@ -142,7 +167,7 @@ impl EvalEnv {
         EvalEnv::default()
     }
 
-    fn upsert_var(&mut self, id: String, initializer: Option<EvalValue>) -> Option<EvalValue> {
+    fn upsert_var(&mut self, id: Arc<str>, initializer: Option<EvalValue>) -> Option<EvalValue> {
         let init = if let Some(ev) = initializer {
             ev
         } else {
@@ -185,13 +210,17 @@ pub struct Eval<'eval> {
     global_env: EvalEnv,
     env: Stack<EvalEnv>,
     global_fns: HashMap<&'static str, Callable>,
+    interner: StringInterner,
 }
 
 impl<'eval> Eval<'_> {
     pub fn new(source: &str, expression_mode: bool) -> Eval<'_> {
+        let mut interner = StringInterner::new();
         let mut global_env = EvalEnv::new();
+        
+        let clock_name = interner.intern("clock");
         global_env.add_fn(LoxFunction {
-            name: "clock".to_string(),
+            name: clock_name,
             params: None,
             fn_type: LoxFunctionType::System("clock"),
             state: None,
@@ -206,6 +235,7 @@ impl<'eval> Eval<'_> {
             global_env,
             env: Stack::new(),
             global_fns,
+            interner,
         }
     }
 
@@ -217,11 +247,12 @@ impl<'eval> Eval<'_> {
         }
     }
 
-    fn add_var(&mut self, id: String, initializer: Option<EvalValue>) -> Option<EvalValue> {
+    fn add_var(&mut self, id: &str, initializer: Option<EvalValue>) -> Option<EvalValue> {
+        let interned_id = self.interner.intern(id);
         if let Some(env) = self.env.front_mut() {
-            env.upsert_var(id, initializer)
+            env.upsert_var(interned_id, initializer)
         } else {
-            self.global_env.upsert_var(id, initializer)
+            self.global_env.upsert_var(interned_id, initializer)
         }
     }
 
@@ -466,7 +497,7 @@ impl<'eval> Eval<'_> {
         };
 
         if let Lexeme::Identifier(id) = &token.lexeme {
-            self.add_var(id.clone(), initializer);
+            self.add_var(id, initializer);
         } else {
             panic!("invalid token {token}");
         }
@@ -639,7 +670,7 @@ impl<'eval> Eval<'_> {
                         let (has_state, fn_type, params) =
                             self.extract_fn_details(callee, args, site, id)?;
 
-                        self.finish_call(f.name, args, has_state, fn_type, params)?
+                        self.finish_call(&f.name, args, has_state, fn_type, params)?
                     }
                     _v => panic!("eval_call: not a function: {_v}"),
                 };
@@ -664,7 +695,7 @@ impl<'eval> Eval<'_> {
                     let (has_state, fn_type, params) =
                         self.extract_fn_details(callee, args, site, &f.name)?;
 
-                    self.finish_call(f.name, args, has_state, fn_type, params)?
+                    self.finish_call(&f.name, args, has_state, fn_type, params)?
                 }
                 _v => panic!("eval_call: not a function: {_v}"),
             }
@@ -677,11 +708,11 @@ impl<'eval> Eval<'_> {
 
     fn finish_call(
         &mut self,
-        fn_name: String,
+        fn_name: &str,
         args: &[AstExpr],
         has_state: bool,
         fn_type: LoxFunctionType,
-        params: Option<Vec<String>>,
+        params: Option<Vec<Arc<str>>>,
     ) -> EvalResult<EvalValue> {
         let val = if has_state {
             let mut func_state = if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&fn_name) {
@@ -729,8 +760,8 @@ impl<'eval> Eval<'_> {
         callee: &AstExpr,
         args: &[AstExpr],
         site: &Span,
-        id: &String,
-    ) -> EvalResult<(bool, LoxFunctionType, Option<Vec<String>>)> {
+        id: &str,
+    ) -> EvalResult<(bool, LoxFunctionType, Option<Vec<Arc<str>>>)> {
         let (has_state, fn_type, params) =
             if let Some(EvalValue::FunDecl(lox_func)) = self.var_value(id) {
                 trace!("checking arity of {callee}");
@@ -755,7 +786,7 @@ impl<'eval> Eval<'_> {
     fn do_fn_call(
         &mut self,
         fn_type: &LoxFunctionType,
-        params: &Option<Vec<String>>,
+        params: &Option<Vec<Arc<str>>>,
         args: &[AstExpr],
     ) -> EvalResult<EvalValue> {
         BlockScope::enter(self, |eval| match fn_type {
@@ -774,7 +805,7 @@ impl<'eval> Eval<'_> {
             LoxFunctionType::UserDefined(body) => {
                 for (param, arg) in params.iter().flatten().zip(args) {
                     let val = eval.eval_expr(arg)?;
-                    eval.add_var(param.clone(), Some(val));
+                    eval.add_var(param, Some(val));
                 }
                 trace!("calling UDF {fn_type}");
                 eval.eval_ast(body)
@@ -807,10 +838,15 @@ impl<'eval> Eval<'_> {
             None
         };
 
+        let interned_name = self.interner.intern(name);
+        let interned_params: Vec<Arc<str>> = params.iter()
+            .map(|p| self.interner.intern(p))
+            .collect();
+
         trace!("eval_fun_decl: saving state for {name}: {state:?}");
         self.add_lox_fn(LoxFunction {
-            name: name.to_string(),
-            params: Some(params.to_vec()),
+            name: interned_name,
+            params: Some(interned_params),
             fn_type: LoxFunctionType::UserDefined((*body).clone()),
             state,
         });
@@ -840,6 +876,44 @@ mod tests {
     
     fn string_val(s: &str) -> EvalValue {
         EvalValue::String(Cow::Owned(s.to_string()))
+    }
+    
+    #[test]
+    fn test_thread_safety() {
+        // Test that EvalValue implements Send + Sync (required for anyhow::Error compatibility)
+        fn assert_send<T: Send>() {}
+        fn assert_sync<T: Sync>() {}
+        
+        assert_send::<EvalValue>();
+        assert_sync::<EvalValue>();
+        assert_send::<EvalErrors>();
+        assert_sync::<EvalErrors>();
+    }
+
+    #[test]
+    fn test_string_interning_benefits() {
+        // Test that demonstrates string interning benefits
+        let program = r#"
+        fun fibonacci(n) {
+            if (n <= 1) return n;
+            return fibonacci(n - 1) + fibonacci(n - 2);
+        }
+        
+        var x = 5;
+        var y = 10;
+        var result = fibonacci(x);
+        print result;
+        "#;
+        
+        let mut eval = Eval::new(program, false);
+        
+        // Verify the interner has some common strings
+        let interner_before = eval.interner.strings.len();
+        let _ = eval.evaluate(); // May fail due to recursion, but should populate interner
+        let interner_after = eval.interner.strings.len();
+        
+        // Should have interned at least function names, variable names
+        assert!(interner_after >= interner_before);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use log::trace;
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
 use std::mem;
@@ -13,12 +14,13 @@ use crate::span::Span;
 
 pub type Callable = fn(&[EvalValue]) -> EvalResult<EvalValue>;
 
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EvalValue {
     Return(Box<EvalValue>),
     FunDecl(LoxFunction),
     Number(f64),
-    String(String),
+    String(Cow<'static, str>),
     Boolean(bool),
     Nil,
 }
@@ -349,7 +351,7 @@ impl<'eval> Eval<'_> {
         trace!("eval_terminal");
         let val = match &token.lexeme {
             Lexeme::Number(_, v) => EvalValue::Number(*v),
-            Lexeme::String(s) => EvalValue::String(s.to_string()),
+            Lexeme::String(s) => EvalValue::String(Cow::Owned(s.clone())),
             Lexeme::Identifier(id) => self
                 .eval_identifier(id)
                 .ok_or_else(|| EvalErrors::UndefinedVar(id.clone(), token.span.line()))?,
@@ -396,7 +398,10 @@ impl<'eval> Eval<'_> {
         let result = match op.lexeme {
             Lexeme::Plus => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l + r),
-                (EvalValue::String(l), EvalValue::String(r)) => EvalValue::String(l + &r),
+                (EvalValue::String(l), EvalValue::String(r)) => {
+                    let concatenated = format!("{}{}", l, r);
+                    EvalValue::String(Cow::Owned(concatenated))
+                }
                 _e => {
                     trace!("bad + operands: left = {:?}, right = {:?}", _e.0, _e.1);
                     return Err(EvalErrors::StringsOrNumbers(op.span.line()));
@@ -769,7 +774,7 @@ impl<'eval> Eval<'_> {
             LoxFunctionType::UserDefined(body) => {
                 for (param, arg) in params.iter().flatten().zip(args) {
                     let val = eval.eval_expr(arg)?;
-                    eval.add_var(param.to_string(), Some(val));
+                    eval.add_var(param.clone(), Some(val));
                 }
                 trace!("calling UDF {fn_type}");
                 eval.eval_ast(body)
@@ -832,13 +837,17 @@ mod tests {
     use super::*;
     use crate::span::Span;
     use crate::util::print_ast;
+    
+    fn string_val(s: &str) -> EvalValue {
+        EvalValue::String(Cow::Owned(s.to_string()))
+    }
 
     #[test]
     fn test_eval_value_display() {
         assert_eq!(format!("{}", EvalValue::Number(42.0)), "42");
         assert_eq!(format!("{}", EvalValue::Number(1.23)), "1.23");
         assert_eq!(
-            format!("{}", EvalValue::String("hello".to_string())),
+            format!("{}", string_val("hello")),
             "hello"
         );
         assert_eq!(format!("{}", EvalValue::Boolean(true)), "true");
@@ -850,16 +859,16 @@ mod tests {
     fn test_eval_value_equality() {
         assert_eq!(EvalValue::Number(42.0), EvalValue::Number(42.0));
         assert_eq!(
-            EvalValue::String("test".to_string()),
-            EvalValue::String("test".to_string())
+            string_val("test"),
+            string_val("test")
         );
         assert_eq!(EvalValue::Boolean(true), EvalValue::Boolean(true));
         assert_eq!(EvalValue::Nil, EvalValue::Nil);
 
         assert_ne!(EvalValue::Number(42.0), EvalValue::Number(43.0));
         assert_ne!(
-            EvalValue::String("test".to_string()),
-            EvalValue::String("other".to_string())
+            string_val("test"),
+            string_val("other")
         );
         assert_ne!(EvalValue::Boolean(true), EvalValue::Boolean(false));
     }
@@ -890,7 +899,7 @@ mod tests {
             span: Span::new(0, 0, 1),
         };
         let result = eval.eval_terminal(&token).unwrap();
-        assert_eq!(result, EvalValue::String("hello".to_string()));
+        assert_eq!(result, string_val("hello"));
     }
 
     #[test]
@@ -1019,7 +1028,7 @@ mod tests {
         let result = eval
             .eval_binary(&plus_token, &left_expr, &right_expr)
             .unwrap();
-        assert_eq!(result, EvalValue::String("hello world".to_string()));
+        assert_eq!(result, string_val("hello world"));
     }
 
     #[test]
@@ -1170,7 +1179,7 @@ mod tests {
     fn test_eval_errors_display() {
         let error1 = EvalErrors::InvalidUnaryOp {
             op: Lexeme::Bang,
-            val: Box::new(EvalValue::String("test".to_string())),
+            val: Box::new(string_val("test")),
             line: 1,
         };
         assert_eq!(format!("{error1}"), "invalid op ! for test\n[line 1]");
@@ -1470,14 +1479,14 @@ mod tests {
     fn test_eval_logical_or_with_strings() {
         let mut eval = Eval::new("\"\" or \"hello\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("".to_string()));
+        assert_eq!(result, string_val(""));
     }
 
     #[test]
     fn test_eval_logical_or_with_truthy_string() {
         let mut eval = Eval::new("\"hello\" or \"world\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("hello".to_string()));
+        assert_eq!(result, string_val("hello"));
     }
 
     #[test]
@@ -1519,14 +1528,14 @@ mod tests {
     fn test_eval_logical_and_with_strings() {
         let mut eval = Eval::new("\"hello\" and \"world\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("world".to_string()));
+        assert_eq!(result, string_val("world"));
     }
 
     #[test]
     fn test_eval_logical_and_with_empty_string() {
         let mut eval = Eval::new("\"\" and \"hello\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("hello".to_string()));
+        assert_eq!(result, string_val("hello"));
     }
 
     #[test]
@@ -1554,7 +1563,7 @@ mod tests {
     fn test_eval_logical_and_both_truthy() {
         let mut eval = Eval::new("42 and \"hello\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("hello".to_string()));
+        assert_eq!(result, string_val("hello"));
     }
 
     #[test]
@@ -1565,22 +1574,22 @@ mod tests {
         assert!(Eval::is_truthy(&EvalValue::Number(42.0)));
         assert!(Eval::is_truthy(&EvalValue::Number(0.0)));
         assert!(Eval::is_truthy(&EvalValue::Number(-1.0)));
-        assert!(Eval::is_truthy(&EvalValue::String("hello".to_string())));
-        assert!(Eval::is_truthy(&EvalValue::String("".to_string())));
+        assert!(Eval::is_truthy(&string_val("hello")));
+        assert!(Eval::is_truthy(&string_val("")));
     }
 
     #[test]
     fn test_eval_logical_chained_or() {
         let mut eval = Eval::new("false or nil or \"hello\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("hello".to_string()));
+        assert_eq!(result, string_val("hello"));
     }
 
     #[test]
     fn test_eval_logical_chained_and() {
         let mut eval = Eval::new("true and 42 and \"hello\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("hello".to_string()));
+        assert_eq!(result, string_val("hello"));
     }
 
     #[test]

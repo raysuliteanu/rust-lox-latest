@@ -13,7 +13,7 @@ use crate::span::Span;
 
 pub type Callable = fn(&[EvalValue]) -> EvalResult<EvalValue>;
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EvalValue {
     Return(Box<EvalValue>),
     FunDecl(LoxFunction),
@@ -101,9 +101,9 @@ impl Display for LoxFunction {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum LoxFunctionType {
-    System(Callable),
+    System(&'static str),
     UserDefined(Ast),
 }
 
@@ -112,15 +112,6 @@ impl Display for LoxFunctionType {
         match self {
             LoxFunctionType::System(s) => write!(f, "<system>: {s:?}"),
             LoxFunctionType::UserDefined(ast) => write!(f, "{ast}"),
-        }
-    }
-}
-
-impl Clone for LoxFunctionType {
-    fn clone(&self) -> Self {
-        match self {
-            LoxFunctionType::System(callable) => LoxFunctionType::System(*callable),
-            LoxFunctionType::UserDefined(ast) => LoxFunctionType::UserDefined(ast.clone()),
         }
     }
 }
@@ -191,23 +182,28 @@ pub struct Eval<'eval> {
     expression_mode: bool,
     global_env: EvalEnv,
     env: Stack<EvalEnv>,
+    global_fns: HashMap<&'static str, Callable>,
 }
 
 impl<'eval> Eval<'_> {
-    pub fn new(source: &str, expression_mode: bool) -> Eval {
+    pub fn new(source: &str, expression_mode: bool) -> Eval<'_> {
         let mut global_env = EvalEnv::new();
         global_env.add_fn(LoxFunction {
             name: "clock".to_string(),
             params: None,
-            fn_type: LoxFunctionType::System(func::clock),
+            fn_type: LoxFunctionType::System("clock"),
             state: None,
         });
+
+        let mut global_fns: HashMap<&'static str, Callable> = HashMap::new();
+        global_fns.insert("clock", func::clock);
 
         Eval {
             source,
             expression_mode,
             global_env,
             env: Stack::new(),
+            global_fns,
         }
     }
 
@@ -336,7 +332,7 @@ impl<'eval> Eval<'_> {
             AstExpr::Unary { op, exp } => self.eval_unary(op, exp),
             AstExpr::Binary { op, left, right } => self.eval_binary(op, left, right),
             AstExpr::Assignment { id, expr } => self.eval_assignment(id, expr),
-            AstExpr::Call { func, args, site } => self.eval_call(func, args, site),
+            AstExpr::Call { callee, args, site } => self.eval_call(callee, args, site),
             AstExpr::Logical { op, left, right } => self.eval_logical(op, left, right),
         }
     }
@@ -602,9 +598,14 @@ impl<'eval> Eval<'_> {
         Ok(EvalValue::Nil)
     }
 
-    fn eval_call(&mut self, func_id: &str, args: &[AstExpr], site: &Span) -> EvalResult<EvalValue> {
+    fn eval_call(
+        &mut self,
+        callee: &AstExpr,
+        args: &[AstExpr],
+        site: &Span,
+    ) -> EvalResult<EvalValue> {
         trace!(
-            "eval_call: {func_id}({}) @ {site}",
+            "eval_call: {callee}({}) @ {site}",
             args.iter()
                 .map(|a| format!("{a}"))
                 .collect::<Vec<_>>()
@@ -616,37 +617,83 @@ impl<'eval> Eval<'_> {
             self.env, self.global_env
         );
 
-        // Get all function data we need in one immutable borrow
-        let (has_state, fn_type, params) =
-            if let Some(EvalValue::FunDecl(lox_func)) = self.var_value(func_id) {
-                trace!("checking arity of {func_id}");
-                if lox_func.arity() != args.len() {
-                    return Err(EvalErrors::ArityMismatch {
-                        expected: lox_func.arity(),
-                        actual: args.len(),
-                        line: site.line(),
-                    });
-                }
+        let result = if let AstExpr::Terminal(Token {
+            lexeme: Lexeme::Identifier(id),
+            ..
+        }) = callee
+        {
+            let (has_state, fn_type, params) = self.extract_fn_details(callee, args, site, id)?;
 
-                (
-                    lox_func.state.is_some(),
-                    lox_func.fn_type.clone(),
-                    lox_func.params.clone(),
-                )
-            } else {
-                panic!("no such function {func_id} at {site}");
-            };
-
-        let val = if has_state {
-            let mut func_state =
-                if let Some(EvalValue::FunDecl(lox_func)) = self.var_value_mut(func_id) {
-                    lox_func
-                        .state
+            let val = if has_state {
+                let mut func_state = if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(id) {
+                    f.state
                         .take()
                         .expect("has_state was true but state is None")
                 } else {
-                    panic!("function {func_id} disappeared!");
+                    panic!("function {callee} disappeared!");
                 };
+
+                mem::swap(&mut self.env, &mut func_state);
+
+                let result = match self.eval_expr(callee)? {
+                    EvalValue::FunDecl(f) => {
+                        trace!("eval_call: func: {f}");
+
+                        let (has_state, fn_type, params) =
+                            self.extract_fn_details(callee, args, site, id)?;
+
+                        self.finish_call(f.name, args, has_state, fn_type, params)?
+                    }
+                    _v => panic!("eval_call: not a function: {_v}"),
+                };
+
+                mem::swap(&mut self.env, &mut func_state);
+
+                if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(id) {
+                    f.state = Some(func_state);
+                }
+
+                result
+            } else {
+                self.do_fn_call(&fn_type, &params, args)?
+            };
+
+            Self::extract_return_val(val)
+        } else {
+            match self.eval_expr(callee)? {
+                EvalValue::FunDecl(f) => {
+                    trace!("eval_call: func: {f}");
+
+                    let (has_state, fn_type, params) =
+                        self.extract_fn_details(callee, args, site, &f.name)?;
+
+                    self.finish_call(f.name, args, has_state, fn_type, params)?
+                }
+                _v => panic!("eval_call: not a function: {_v}"),
+            }
+        };
+
+        trace!("eval_call: returning {result}");
+
+        Ok(result.clone())
+    }
+
+    fn finish_call(
+        &mut self,
+        fn_name: String,
+        args: &[AstExpr],
+        has_state: bool,
+        fn_type: LoxFunctionType,
+        params: Option<Vec<String>>,
+    ) -> EvalResult<EvalValue> {
+        let val = if has_state {
+            let mut func_state = if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&fn_name) {
+                f.state
+                    .take()
+                    .expect("has_state was true but state is None")
+            } else {
+                panic!("function {fn_name} disappeared!");
+            };
 
             mem::swap(&mut self.env, &mut func_state);
 
@@ -654,8 +701,8 @@ impl<'eval> Eval<'_> {
 
             mem::swap(&mut self.env, &mut func_state);
 
-            if let Some(EvalValue::FunDecl(lox_func)) = self.var_value_mut(func_id) {
-                lox_func.state = Some(func_state);
+            if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&fn_name) {
+                f.state = Some(func_state);
             }
 
             result
@@ -663,24 +710,49 @@ impl<'eval> Eval<'_> {
             self.do_fn_call(&fn_type, &params, args)?
         };
 
-        let result = if let EvalValue::Return(v) = val {
-            trace!("eval_call - got return: {}", *v);
-            // due to recursion, could have nested EvalValue::Return,
-            // so extract the "root" EvalValue
-            let mut ret = v;
-            while let EvalValue::Return(v) = *ret {
+        Ok(Self::extract_return_val(val))
+    }
+
+    fn extract_return_val(val: EvalValue) -> EvalValue {
+        if let EvalValue::Return(r) = val {
+            let mut ret = *r;
+            while let EvalValue::Return(v) = ret {
                 trace!("eval_call - got return: {v}");
-                ret = v;
+                ret = *v;
             }
 
-            *ret
+            ret
         } else {
             val
-        };
+        }
+    }
 
-        trace!("eval_call: returning {result}");
-
-        Ok(result)
+    fn extract_fn_details(
+        &mut self,
+        callee: &AstExpr,
+        args: &[AstExpr],
+        site: &Span,
+        id: &String,
+    ) -> EvalResult<(bool, LoxFunctionType, Option<Vec<String>>)> {
+        let (has_state, fn_type, params) =
+            if let Some(EvalValue::FunDecl(lox_func)) = self.var_value(id) {
+                trace!("checking arity of {callee}");
+                if lox_func.arity() != args.len() {
+                    return Err(EvalErrors::ArityMismatch {
+                        expected: lox_func.arity(),
+                        actual: args.len(),
+                        line: site.line(),
+                    });
+                }
+                (
+                    lox_func.state.is_some(),
+                    lox_func.fn_type.clone(),
+                    lox_func.params.clone(),
+                )
+            } else {
+                panic!("can't find {} in state", id)
+            };
+        Ok((has_state, fn_type, params))
     }
 
     fn do_fn_call(
@@ -698,7 +770,7 @@ impl<'eval> Eval<'_> {
             }
 
             match fn_type {
-                LoxFunctionType::System(system) => system(&vals),
+                LoxFunctionType::System(name) => eval.call_system_fn(name, &vals),
                 LoxFunctionType::UserDefined(body) => {
                     for (param, value) in params.iter().flatten().zip(vals) {
                         eval.add_var(param.to_string(), Some(value));
@@ -709,6 +781,18 @@ impl<'eval> Eval<'_> {
                 }
             }
         })
+    }
+
+    fn call_system_fn(
+        &mut self,
+        name: &'static str,
+        params: &[EvalValue],
+    ) -> EvalResult<EvalValue> {
+        if let Some(func) = self.global_fns.get(name) {
+            (*func)(params)
+        } else {
+            panic!("missing system function {name}");
+        }
     }
 
     fn eval_fun_decl(
@@ -731,6 +815,7 @@ impl<'eval> Eval<'_> {
             fn_type: LoxFunctionType::UserDefined((*body).clone()),
             state,
         });
+
         Ok(EvalValue::Nil)
     }
 

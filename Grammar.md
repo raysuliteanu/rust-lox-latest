@@ -60,5 +60,5 @@ DIGIT          → "0" ... "9" ;
 | Equality   | == !=     | Left       |
 | Comparison | > >= < <= | Left       |
 | Term       | - +       | Left       |
-| Factor     | / \*      | Left       |
+| Factor     | / *      | Left       |
 | Unary      | ! -       | Right      |

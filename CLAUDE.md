@@ -146,6 +146,7 @@ The parser implements the complete Lox grammar with proper operator precedence:
 - The codebase follows functional programming patterns with immutable data structures where possible
 - Error messages are designed to match the Crafting Interpreters specification
 - Test Lox programs are located in the `test/` directory for integration testing
+- use jj for vcs
 
 ## Testing Approach
 

@@ -55,7 +55,8 @@ fn main() -> Result<ExitCode> {
     match lox.commands {
         LoxCommands::Tokenize { filename } => {
             let source = get_source(filename)?;
-            if let Err(e) = Scanner::new(&source, true).scan() {
+            let mut scanner = Scanner::new(&source, true);
+            if let Err(e) = scanner.scan() {
                 rc = e;
             }
         }

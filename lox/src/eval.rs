@@ -359,10 +359,10 @@ impl<'eval> Eval<'_> {
         trace!("eval_terminal");
         let val = match &token.lexeme {
             Lexeme::Number(_, v) => EvalValue::Number(*v),
-            Lexeme::String(s) => EvalValue::String(Cow::Owned(s.clone())),
+            Lexeme::String(s) => EvalValue::String(Cow::Owned(s.to_string())),
             Lexeme::Identifier(id) => self
                 .eval_identifier(id)
-                .ok_or_else(|| EvalErrors::UndefinedVar(id.clone(), token.span.line()))?,
+                .ok_or_else(|| EvalErrors::UndefinedVar(id.to_string(), token.span.line()))?,
             Lexeme::True => EvalValue::Boolean(true),
             Lexeme::False => EvalValue::Boolean(false),
             Lexeme::Nil => EvalValue::Nil,
@@ -925,7 +925,7 @@ mod tests {
     fn test_eval_terminal_number() {
         let eval = Eval::new("", false);
         let token = Token {
-            lexeme: Lexeme::Number("42".to_string(), 42.0),
+            lexeme: Lexeme::Number("42".into(), 42.0),
             span: Span::new(0, 0, 1),
         };
         let result = eval.eval_terminal(&token).unwrap();
@@ -936,7 +936,7 @@ mod tests {
     fn test_eval_terminal_string() {
         let eval = Eval::new("", false);
         let token = Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         };
         let result = eval.eval_terminal(&token).unwrap();
@@ -1003,7 +1003,7 @@ mod tests {
         assert_eq!(result, EvalValue::Boolean(true));
 
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("42".to_string(), 42.0),
+            lexeme: Lexeme::Number("42".into(), 42.0),
             span: Span::new(0, 0, 1),
         });
         let result = eval.eval_unary(&bang_token, &number_expr).unwrap();
@@ -1019,7 +1019,7 @@ mod tests {
         };
 
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("42".to_string(), 42.0),
+            lexeme: Lexeme::Number("42".into(), 42.0),
             span: Span::new(0, 0, 1),
         });
         let result = eval.eval_unary(&minus_token, &number_expr).unwrap();
@@ -1035,11 +1035,11 @@ mod tests {
         };
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("10".to_string(), 10.0),
+            lexeme: Lexeme::Number("10".into(), 10.0),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1058,11 +1058,11 @@ mod tests {
         };
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String(" world".to_string()),
+            lexeme: Lexeme::String(" world".into()),
             span: Span::new(0, 0, 1),
         });
 
@@ -1077,11 +1077,11 @@ mod tests {
         let mut eval = Eval::new("", false);
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("10".to_string(), 10.0),
+            lexeme: Lexeme::Number("10".into(), 10.0),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1118,11 +1118,11 @@ mod tests {
         let mut eval = Eval::new("", false);
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1150,11 +1150,11 @@ mod tests {
         let mut eval = Eval::new("", false);
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("10".to_string(), 10.0),
+            lexeme: Lexeme::Number("10".into(), 10.0),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1247,7 +1247,7 @@ mod tests {
         };
 
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("42".to_string(), 42.0),
+            lexeme: Lexeme::Number("42".into(), 42.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1267,7 +1267,7 @@ mod tests {
         };
 
         let string_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
 
@@ -1287,7 +1287,7 @@ mod tests {
         };
 
         let string_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
 
@@ -1307,11 +1307,11 @@ mod tests {
         };
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("10".to_string(), 10.0),
+            lexeme: Lexeme::Number("10".into(), 10.0),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1330,11 +1330,11 @@ mod tests {
             span: Span::new(0, 0, 1),
         };
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("42".to_string(), 42.0),
+            lexeme: Lexeme::Number("42".into(), 42.0),
             span: Span::new(0, 0, 1),
         });
         let string_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
 
@@ -1354,11 +1354,11 @@ mod tests {
         };
 
         let string_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1378,11 +1378,11 @@ mod tests {
         };
 
         let string_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1402,12 +1402,12 @@ mod tests {
         };
 
         let string_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
 
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1424,11 +1424,11 @@ mod tests {
         };
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("10".to_string(), 10.0),
+            lexeme: Lexeme::Number("10".into(), 10.0),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("0".to_string(), 0.0),
+            lexeme: Lexeme::Number("0".into(), 0.0),
             span: Span::new(0, 0, 1),
         });
 

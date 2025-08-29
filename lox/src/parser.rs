@@ -169,7 +169,7 @@ impl<'parser> Parser<'parser> {
     }
 
     pub fn parse(&mut self) -> ParseResult<Vec<Ast>> {
-        let scanner = Scanner::new(self.source, false);
+        let mut scanner = Scanner::new(self.source, false);
         if let Ok(tokens) = scanner.scan() {
             if tokens.is_empty() {
                 trace!("no tokens scanned");
@@ -276,7 +276,7 @@ impl<'parser> Parser<'parser> {
                 _ => panic!("matched {id} but next_if() said it was an Lexeme::Identifier"),
             }
         } else if let Some(token) = tokens.peek() {
-            Err(ast_expected_token!(token token, Lexeme::Identifier("id".to_owned())))
+            Err(ast_expected_token!(token token, Lexeme::Identifier("id".into())))
         } else {
             Err(ParseError::UnexpectedEof)
         }
@@ -872,7 +872,7 @@ mod tests {
 
     #[test]
     fn test_ast_display_return_statement_with_value() {
-        let expr = AstExpr::Terminal(create_token(Lexeme::Number("42".to_string(), 42.0)));
+        let expr = AstExpr::Terminal(create_token(Lexeme::Number("42".into(), 42.0)));
         let return_stmt = Ast::Statement(AstStmt::Return(Some(Box::new(expr))));
         assert_eq!(return_stmt.to_string(), "return 42.0;");
     }
@@ -892,8 +892,8 @@ mod tests {
 
     #[test]
     fn test_ast_display_binary_expression() {
-        let left = AstExpr::Terminal(create_token(Lexeme::Number("1".to_string(), 1.0)));
-        let right = AstExpr::Terminal(create_token(Lexeme::Number("2".to_string(), 2.0)));
+        let left = AstExpr::Terminal(create_token(Lexeme::Number("1".into(), 1.0)));
+        let right = AstExpr::Terminal(create_token(Lexeme::Number("2".into(), 2.0)));
         let op = create_token(Lexeme::Plus);
         let binary = AstExpr::Binary {
             op,
@@ -905,7 +905,7 @@ mod tests {
 
     #[test]
     fn test_ast_display_unary_expression() {
-        let expr = AstExpr::Terminal(create_token(Lexeme::Number("5".to_string(), 5.0)));
+        let expr = AstExpr::Terminal(create_token(Lexeme::Number("5".into(), 5.0)));
         let op = create_token(Lexeme::Minus);
         let unary = Ast::Expression(AstExpr::Unary {
             op,
@@ -926,18 +926,18 @@ mod tests {
         assert_eq!(nil_ast.to_string(), "nil");
 
         let number_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Number(
-            "1.23".to_string(),
+            "1.23".into(),
             1.23,
         ))));
         assert_eq!(number_ast.to_string(), "1.23");
 
         let string_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::String(
-            "hello".to_string(),
+            "hello".into(),
         ))));
         assert_eq!(string_ast.to_string(), "hello");
 
         let identifier_ast = Ast::Expression(AstExpr::Terminal(create_token(Lexeme::Identifier(
-            "var_name".to_string(),
+            "var_name".into(),
         ))));
         assert_eq!(identifier_ast.to_string(), "var_name");
     }
@@ -1122,8 +1122,8 @@ mod tests {
 
     #[test]
     fn test_expression_type_display() {
-        let left = AstExpr::Terminal(create_token(Lexeme::Number("1".to_string(), 1.0)));
-        let right = AstExpr::Terminal(create_token(Lexeme::Number("2".to_string(), 2.0)));
+        let left = AstExpr::Terminal(create_token(Lexeme::Number("1".into(), 1.0)));
+        let right = AstExpr::Terminal(create_token(Lexeme::Number("2".into(), 2.0)));
         let op = create_token(Lexeme::Plus);
         let binary = AstExpr::Binary {
             op,
@@ -1132,7 +1132,7 @@ mod tests {
         };
         assert_eq!(binary.to_string(), "(+ 1.0 2.0)");
 
-        let expr = AstExpr::Terminal(create_token(Lexeme::Number("5".to_string(), 5.0)));
+        let expr = AstExpr::Terminal(create_token(Lexeme::Number("5".into(), 5.0)));
         let op = create_token(Lexeme::Minus);
         let unary = AstExpr::Unary {
             op,
@@ -1317,12 +1317,12 @@ mod tests {
     #[test]
     fn test_ast_display_call_expression() {
         let args = vec![
-            AstExpr::Terminal(create_token(Lexeme::Number("42".to_string(), 42.0))),
-            AstExpr::Terminal(create_token(Lexeme::String("hello".to_string()))),
+            AstExpr::Terminal(create_token(Lexeme::Number("42".into(), 42.0))),
+            AstExpr::Terminal(create_token(Lexeme::String("hello".into()))),
         ];
         let call = AstExpr::Call {
             callee: Box::new(AstExpr::Terminal(create_token(Lexeme::Identifier(
-                "foo".to_string(),
+                "foo".into(),
             )))),
             args,
             site: Span::new(1, 0, 1),
@@ -1334,7 +1334,7 @@ mod tests {
     fn test_ast_display_call_no_args() {
         let call = AstExpr::Call {
             callee: Box::new(AstExpr::Terminal(create_token(Lexeme::Identifier(
-                "foo".to_string(),
+                "foo".into(),
             )))),
             args: vec![],
             site: Span::new(1, 0, 1),
@@ -1345,12 +1345,12 @@ mod tests {
     #[test]
     fn test_ast_display_nested_call() {
         let inner_args = vec![AstExpr::Terminal(create_token(Lexeme::Number(
-            "5".to_string(),
+            "5".into(),
             5.0,
         )))];
         let inner_call = AstExpr::Call {
             callee: Box::new(AstExpr::Terminal(create_token(Lexeme::Identifier(
-                "bar".to_string(),
+                "bar".into(),
             )))),
             args: inner_args,
             site: Span::new(1, 0, 1),
@@ -1359,7 +1359,7 @@ mod tests {
         let outer_args = vec![inner_call];
         let outer_call = AstExpr::Call {
             callee: Box::new(AstExpr::Terminal(create_token(Lexeme::Identifier(
-                "foo".to_string(),
+                "foo".into(),
             )))),
             args: outer_args,
             site: Span::new(1, 0, 1),

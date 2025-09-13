@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::sync::Arc;
 
 use crate::span::Span;
 
@@ -117,9 +118,9 @@ pub enum Lexeme {
     Slash,
 
     // value holders
-    Number(String, f64),
-    Identifier(String),
-    String(String),
+    Number(Arc<str>, f64),
+    Identifier(Arc<str>),
+    String(Arc<str>),
 
     // symbolic placeholder
     Eof,
@@ -166,7 +167,7 @@ impl Lexeme {
             Lexeme::Print => "print",
             Lexeme::Eof => "eof",
             // Variable lexemes don't have constant representations
-            Lexeme::Number(s, _) | Lexeme::Identifier(s) | Lexeme::String(s) => s.as_str(),
+            Lexeme::Number(s, _) | Lexeme::Identifier(s) | Lexeme::String(s) => s.as_ref(),
         }
     }
 
@@ -198,8 +199,8 @@ impl Lexeme {
 impl From<&Lexeme> for String {
     fn from(value: &Lexeme) -> Self {
         match value {
-            Lexeme::Identifier(s) | Lexeme::String(s) => String::from(s),
-            Lexeme::Number(s, _) => String::from(s),
+            Lexeme::Identifier(s) | Lexeme::String(s) => s.to_string(),
+            Lexeme::Number(s, _) => s.to_string(),
             // For all constant lexemes, use the lexeme_str() method
             _ => value.lexeme_str().to_string(),
         }

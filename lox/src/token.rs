@@ -3,12 +3,13 @@ use thiserror::Error;
 use crate::{
     model::{Lexeme, Token},
     span::Span,
+    util::StringInterner,
 };
 
 #[derive(Error, Debug)]
 pub enum TokenError {
     #[error("[line {}] Error: Unexpected character: {}", .span.line(),
-    .src[.span.offset()..(.span.offset() + .span.len())].to_string())]
+    &.src[.span.offset()..(.span.offset() + .span.len())])]
     InvalidToken { src: String, span: Span },
 
     // CC/Book wants error message exactly like this even though easy
@@ -21,6 +22,7 @@ pub type TokenResult<T> = Result<T, u8>;
 
 pub struct Scanner<'scanner> {
     source: &'scanner str,
+    interner: StringInterner,
     print_tokens: bool,
 }
 
@@ -28,11 +30,12 @@ impl<'scanner> Scanner<'scanner> {
     pub fn new(source: &'scanner str, print_tokens: bool) -> Self {
         Scanner {
             source,
+            interner: StringInterner::new(),
             print_tokens,
         }
     }
 
-    pub fn scan(self) -> TokenResult<Vec<Token>> {
+    pub fn scan(&mut self) -> TokenResult<Vec<Token>> {
         let mut line: usize = 1;
         let mut tokens: Vec<Token> = Vec::new();
         let mut peekable_iter = self.source.char_indices().peekable();
@@ -90,108 +93,114 @@ impl<'scanner> Scanner<'scanner> {
                         }
                     }
                     '\"' => {
-                        let mut str = String::new();
+                        let start_idx = i + 1; // Skip opening quote
+                        let mut end_idx = start_idx;
 
                         while peekable_iter
                             .peek()
-                            .is_some_and(|(_, l)| !matches!(*l, '"'))
+                            .is_some_and(|(_idx, ch)| !matches!(*ch, '"'))
                         {
-                            let (_, ch) = peekable_iter.next().unwrap();
-                            str.push(ch);
+                            let (idx, _) = peekable_iter.next().unwrap();
+                            end_idx = idx + 1;
                         }
 
                         if peekable_iter.peek().is_none() {
                             let error = TokenError::UnterminatedString {
-                                src: self.source.to_string(),
-                                span: Span::new(line, i, str.len()),
+                                src: self.source.into(),
+                                span: Span::new(line, i, end_idx - i),
                             };
                             eprintln!("{error}");
                             has_error = true;
                         } else {
                             // consume terminating "
-                            let (l, _) = peekable_iter.next().unwrap();
-                            tokens
-                                .push(Token::new(Lexeme::String(str), (line, i + 1, l - 1).into()))
+                            let (_closing_quote_idx, _) = peekable_iter.next().unwrap();
+                            let string_content = &self.source[start_idx..end_idx];
+                            tokens.push(Token::new(
+                                Lexeme::String(self.interner.intern(string_content)),
+                                (line, start_idx, end_idx - start_idx).into()
+                            ));
                         }
                     }
                     c if c.is_ascii_digit() => {
-                        let mut number = String::from(c);
+                        let start_idx = i;
+                        let mut end_idx = i + 1;
+
+                        // Parse integer part
                         while peekable_iter
                             .peek()
-                            .is_some_and(|(_, l)| l.is_ascii_digit())
+                            .is_some_and(|(_idx, ch)| ch.is_ascii_digit())
                         {
-                            let (_, ch) = peekable_iter.next().unwrap();
-                            number.push(ch);
+                            let (idx, _) = peekable_iter.next().unwrap();
+                            end_idx = idx + 1;
                         }
 
-                        if peekable_iter.peek().is_some_and(|(_, l)| matches!(*l, '.')) {
-                            let (_, ch) = peekable_iter.next().unwrap();
-                            number.push(ch);
+                        // Check for decimal point
+                        let mut has_decimal = false;
+                        if peekable_iter.peek().is_some_and(|(_, ch)| *ch == '.') {
+                            let (idx, _) = peekable_iter.next().unwrap();
+                            end_idx = idx + 1;
+                            has_decimal = true;
                         }
 
-                        while peekable_iter
-                            .peek()
-                            .is_some_and(|(_, l)| l.is_ascii_digit())
-                        {
-                            let (_, ch) = peekable_iter.next().unwrap();
-                            number.push(ch);
-                        }
-
-                        let mut num_literal = number.as_str();
-
-                        // There are 3 possibilities now. The number can be one of
-                        // 1. just digits e.g. 123
-                        // 2. digits plus a trailing . e.g. 123.
-                        // 3. digits before and after a . e.g. 123.45
-                        // So doing the splitn(3, '.') will result in
-                        // 1. Some, None, None => the _ case
-                        // 2. Some, Some, None => the 123. case
-                        // 3. Some, Some, Some => the 123.45 case
-                        let mut split = num_literal.splitn(3, '.');
-                        match (split.next(), split.next(), split.next()) {
-                            (Some(first), Some(second), Some(_)) => {
-                                num_literal = &num_literal[..first.len() + 1 + second.len()]; // +1 for the dot sep
+                        // Parse fractional part if decimal point exists
+                        if has_decimal {
+                            while peekable_iter
+                                .peek()
+                                .is_some_and(|(_idx, ch)| ch.is_ascii_digit())
+                            {
+                                let (idx, _) = peekable_iter.next().unwrap();
+                                end_idx = idx + 1;
                             }
-                            (Some(first), Some(second), None) => {
-                                if second.is_empty() {
-                                    num_literal = &num_literal[..first.len()];
-                                }
-                            }
-                            _ => {}
                         }
 
-                        if let Ok(num) = num_literal.parse::<f64>() {
+                        let mut num_slice = &self.source[start_idx..end_idx];
+
+                        // Handle trailing dot case (123. should become 123)
+                        if has_decimal && num_slice.ends_with('.') {
+                            // Check if there are digits after the dot
+                            let dot_pos = num_slice.rfind('.').unwrap();
+                            if dot_pos == num_slice.len() - 1 {
+                                // Trailing dot with no fractional digits, remove it
+                                num_slice = &num_slice[..dot_pos];
+                                end_idx = start_idx + num_slice.len();
+                            }
+                        }
+
+                        if let Ok(num) = num_slice.parse::<f64>() {
                             tokens.push(Token::new(
-                                Lexeme::Number(num_literal.to_string(), num),
-                                (line, i, num_literal.len()).into(),
+                                Lexeme::Number(self.interner.intern(num_slice), num),
+                                (line, start_idx, end_idx - start_idx).into(),
                             ));
                         } else {
                             let error = TokenError::InvalidToken {
-                                src: number.clone(),
-                                span: Span::new(line, i, num_literal.len()),
+                                src: self.source.into(),
+                                span: Span::new(line, start_idx, end_idx - start_idx),
                             };
                             eprintln!("{error}");
                             has_error = true;
                         }
                     }
                     c if c.is_alphabetic() | (c == '_') => {
-                        let mut s = String::from(c);
+                        let start_idx = i;
+                        let mut end_idx = i + 1;
 
                         #[allow(clippy::almost_complete_range)]
                         while peekable_iter.peek().is_some_and(
-                            |(_, l)| matches!(*l, '_' | 'a'..='z'|'A'..='Z' | '0'..'9'),
+                            |(_idx, ch)| matches!(*ch, '_' | 'a'..='z'|'A'..='Z' | '0'..'9'),
                         ) {
-                            let (_, ch) = peekable_iter.next().unwrap();
-                            s.push(ch);
+                            let (idx, _) = peekable_iter.next().unwrap();
+                            end_idx = idx + 1;
                         }
 
-                        if let Some(keyword) = keyword_token(&s) {
-                            tokens.push(Token::new(keyword, (line, i, s.len()).into()))
+                        let identifier_slice = &self.source[start_idx..end_idx];
+                        let len = end_idx - start_idx;
+
+                        if let Some(keyword) = keyword_token(identifier_slice) {
+                            tokens.push(Token::new(keyword, (line, start_idx, len).into()))
                         } else {
-                            let len = s.len();
                             tokens.push(Token::new(
-                                Lexeme::Identifier(s.clone()),
-                                (line, i, len).into(),
+                                Lexeme::Identifier(self.interner.intern(identifier_slice)),
+                                (line, start_idx, len).into(),
                             ));
                         }
                     }
@@ -210,7 +219,7 @@ impl<'scanner> Scanner<'scanner> {
                     }
                     _ => {
                         let error = TokenError::InvalidToken {
-                            src: self.source.to_string(),
+                            src: self.source.into(),
                             span: Span::new(line, i, 1),
                         };
                         eprintln!("{error}");
@@ -264,26 +273,26 @@ mod tests {
 
     #[test]
     fn test_token_display_string() {
-        let token = Token::new(Lexeme::String("hello".to_string()), Span::new(1, 0, 7));
+        let token = Token::new(Lexeme::String("hello".into()), Span::new(1, 0, 7));
         assert_eq!(format!("{token}"), "STRING \"hello\" hello");
     }
 
     #[test]
     fn test_token_display_number_integer() {
-        let token = Token::new(Lexeme::Number("42".to_string(), 42.0), Span::new(1, 0, 2));
+        let token = Token::new(Lexeme::Number("42".into(), 42.0), Span::new(1, 0, 2));
         assert_eq!(format!("{token}"), "NUMBER 42 42.0");
     }
 
     #[test]
     fn test_token_display_number_float() {
-        let token = Token::new(Lexeme::Number("1.23".to_string(), 1.23), Span::new(1, 0, 4));
+        let token = Token::new(Lexeme::Number("1.23".into(), 1.23), Span::new(1, 0, 4));
         assert_eq!(format!("{token}"), "NUMBER 1.23 1.23");
     }
 
     #[test]
     fn test_token_display_identifier() {
         let token = Token::new(
-            Lexeme::Identifier("variable".to_string()),
+            Lexeme::Identifier("variable".into()),
             Span::new(1, 0, 8),
         );
         assert_eq!(format!("{token}"), "IDENTIFIER variable null");
@@ -364,14 +373,14 @@ mod tests {
     #[test]
     fn test_lexeme_display() {
         assert_eq!(
-            format!("{}", Lexeme::Number("42".to_string(), 42.0)),
+            format!("{}", Lexeme::Number("42".into(), 42.0)),
             "NUMBER"
         );
         assert_eq!(
-            format!("{}", Lexeme::Identifier("var".to_string())),
+            format!("{}", Lexeme::Identifier("var".into())),
             "IDENTIFIER"
         );
-        assert_eq!(format!("{}", Lexeme::String("hello".to_string())), "STRING");
+        assert_eq!(format!("{}", Lexeme::String("hello".into())), "STRING");
         assert_eq!(format!("{}", Lexeme::LeftParen), "LEFT_PAREN");
         assert_eq!(format!("{}", Lexeme::True), "TRUE");
         assert_eq!(format!("{}", Lexeme::Eof), "EOF");
@@ -386,7 +395,7 @@ mod tests {
 
     #[test]
     fn test_scanner_empty_source() {
-        let scanner = Scanner::new("", true);
+        let mut scanner = Scanner::new("", true);
         let tokens = scanner.scan().unwrap();
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].lexeme, Lexeme::Eof);
@@ -394,7 +403,7 @@ mod tests {
 
     #[test]
     fn test_scanner_single_tokens() {
-        let scanner = Scanner::new("(){},.+-;*", true);
+        let mut scanner = Scanner::new("(){},.+-;*", true);
         let tokens = scanner.scan().unwrap();
 
         let expected_lexemes = vec![
@@ -419,7 +428,7 @@ mod tests {
 
     #[test]
     fn test_scanner_comparison_operators() {
-        let scanner = Scanner::new("== ! != < <= > >=", true);
+        let mut scanner = Scanner::new("== ! != < <= > >=", true);
         let tokens = scanner.scan().unwrap();
 
         let expected_lexemes = vec![
@@ -441,17 +450,17 @@ mod tests {
 
     #[test]
     fn test_scanner_string_literal() {
-        let scanner = Scanner::new("\"hello world\"", true);
+        let mut scanner = Scanner::new("\"hello world\"", true);
         let tokens = scanner.scan().unwrap();
 
         assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0].lexeme, Lexeme::String("hello world".to_string()));
+        assert_eq!(tokens[0].lexeme, Lexeme::String("hello world".into()));
         assert_eq!(tokens[1].lexeme, Lexeme::Eof);
     }
 
     #[test]
     fn test_scanner_unterminated_string() {
-        let scanner = Scanner::new("\"unterminated", true);
+        let mut scanner = Scanner::new("\"unterminated", true);
         let result = scanner.scan();
 
         assert!(result.is_err());
@@ -461,37 +470,37 @@ mod tests {
 
     #[test]
     fn test_scanner_numbers() {
-        let scanner = Scanner::new("123 1.23 42.0", true);
+        let mut scanner = Scanner::new("123 1.23 42.0", true);
         let tokens = scanner.scan().unwrap();
 
         assert_eq!(tokens.len(), 4);
-        assert_eq!(tokens[0].lexeme, Lexeme::Number("123".to_string(), 123.0));
-        assert_eq!(tokens[1].lexeme, Lexeme::Number("1.23".to_string(), 1.23));
-        assert_eq!(tokens[2].lexeme, Lexeme::Number("42.0".to_string(), 42.0));
+        assert_eq!(tokens[0].lexeme, Lexeme::Number("123".into(), 123.0));
+        assert_eq!(tokens[1].lexeme, Lexeme::Number("1.23".into(), 1.23));
+        assert_eq!(tokens[2].lexeme, Lexeme::Number("42.0".into(), 42.0));
         assert_eq!(tokens[3].lexeme, Lexeme::Eof);
     }
 
     #[test]
     fn test_scanner_identifiers() {
-        let scanner = Scanner::new("variable _123private camelCase", true);
+        let mut scanner = Scanner::new("variable _123private camelCase", true);
         let tokens = scanner.scan().unwrap();
 
         assert_eq!(tokens.len(), 4);
-        assert_eq!(tokens[0].lexeme, Lexeme::Identifier("variable".to_string()));
+        assert_eq!(tokens[0].lexeme, Lexeme::Identifier("variable".into()));
         assert_eq!(
             tokens[1].lexeme,
-            Lexeme::Identifier("_123private".to_string())
+            Lexeme::Identifier("_123private".into())
         );
         assert_eq!(
             tokens[2].lexeme,
-            Lexeme::Identifier("camelCase".to_string())
+            Lexeme::Identifier("camelCase".into())
         );
         assert_eq!(tokens[3].lexeme, Lexeme::Eof);
     }
 
     #[test]
     fn test_scanner_keywords() {
-        let scanner = Scanner::new("true false nil and or", true);
+        let mut scanner = Scanner::new("true false nil and or", true);
         let tokens = scanner.scan().unwrap();
 
         assert_eq!(tokens.len(), 6);
@@ -505,27 +514,27 @@ mod tests {
 
     #[test]
     fn test_scanner_comments() {
-        let scanner = Scanner::new("// this is a comment\n42", true);
+        let mut scanner = Scanner::new("// this is a comment\n42", true);
         let tokens = scanner.scan().unwrap();
 
         assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0].lexeme, Lexeme::Number("42".to_string(), 42.0));
+        assert_eq!(tokens[0].lexeme, Lexeme::Number("42".into(), 42.0));
         assert_eq!(tokens[1].lexeme, Lexeme::Eof);
     }
 
     #[test]
     fn test_scanner_whitespace() {
-        let scanner = Scanner::new("  \t\n  42  \r\n  ", true);
+        let mut scanner = Scanner::new("  \t\n  42  \r\n  ", true);
         let tokens = scanner.scan().unwrap();
 
         assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0].lexeme, Lexeme::Number("42".to_string(), 42.0));
+        assert_eq!(tokens[0].lexeme, Lexeme::Number("42".into(), 42.0));
         assert_eq!(tokens[1].lexeme, Lexeme::Eof);
     }
 
     #[test]
     fn test_scanner_invalid_character() {
-        let scanner = Scanner::new("@", true);
+        let mut scanner = Scanner::new("@", true);
         let result = scanner.scan();
 
         assert!(result.is_err());
@@ -544,7 +553,7 @@ mod tests {
             print fibonacci(10);
         "#;
 
-        let scanner = Scanner::new(source, true);
+        let mut scanner = Scanner::new(source, true);
         let tokens = scanner.scan().unwrap();
 
         // Should contain fun, identifier, (, identifier, ), {, if, (, etc.

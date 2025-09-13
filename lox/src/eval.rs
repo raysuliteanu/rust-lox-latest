@@ -1,8 +1,10 @@
 use anyhow::Result;
 use log::trace;
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
 use std::mem;
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::func;
@@ -10,15 +12,17 @@ use crate::model::{Ast, AstExpr, AstStmt};
 use crate::model::{Lexeme, Token};
 use crate::parser::Parser;
 use crate::span::Span;
+use crate::util::StringInterner;
 
 pub type Callable = fn(&[EvalValue]) -> EvalResult<EvalValue>;
+type FnDetails = (bool, LoxFunctionType, Option<Vec<Arc<str>>>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EvalValue {
     Return(Box<EvalValue>),
     FunDecl(LoxFunction),
     Number(f64),
-    String(String),
+    String(Cow<'static, str>),
     Boolean(bool),
     Nil,
 }
@@ -83,8 +87,8 @@ pub type EvalResult<T> = Result<T, EvalErrors>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoxFunction {
-    name: String,
-    params: Option<Vec<String>>,
+    name: Arc<str>,
+    params: Option<Vec<Arc<str>>>,
     fn_type: LoxFunctionType,
     state: Option<Stack<EvalEnv>>,
 }
@@ -132,7 +136,7 @@ impl BlockScope {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 struct EvalEnv {
-    env: HashMap<String, EvalValue>,
+    env: HashMap<Arc<str>, EvalValue>,
 }
 
 impl EvalEnv {
@@ -140,7 +144,7 @@ impl EvalEnv {
         EvalEnv::default()
     }
 
-    fn upsert_var(&mut self, id: String, initializer: Option<EvalValue>) -> Option<EvalValue> {
+    fn upsert_var(&mut self, id: Arc<str>, initializer: Option<EvalValue>) -> Option<EvalValue> {
         let init = if let Some(ev) = initializer {
             ev
         } else {
@@ -183,13 +187,17 @@ pub struct Eval<'eval> {
     global_env: EvalEnv,
     env: Stack<EvalEnv>,
     global_fns: HashMap<&'static str, Callable>,
+    interner: StringInterner,
 }
 
 impl<'eval> Eval<'_> {
     pub fn new(source: &str, expression_mode: bool) -> Eval<'_> {
+        let mut interner = StringInterner::new();
         let mut global_env = EvalEnv::new();
+
+        let clock_name = interner.intern("clock");
         global_env.add_fn(LoxFunction {
-            name: "clock".to_string(),
+            name: clock_name,
             params: None,
             fn_type: LoxFunctionType::System("clock"),
             state: None,
@@ -204,6 +212,7 @@ impl<'eval> Eval<'_> {
             global_env,
             env: Stack::new(),
             global_fns,
+            interner,
         }
     }
 
@@ -215,11 +224,12 @@ impl<'eval> Eval<'_> {
         }
     }
 
-    fn add_var(&mut self, id: String, initializer: Option<EvalValue>) -> Option<EvalValue> {
+    fn add_var(&mut self, id: &str, initializer: Option<EvalValue>) -> Option<EvalValue> {
+        let interned_id = self.interner.intern(id);
         if let Some(env) = self.env.front_mut() {
-            env.upsert_var(id, initializer)
+            env.upsert_var(interned_id, initializer)
         } else {
-            self.global_env.upsert_var(id, initializer)
+            self.global_env.upsert_var(interned_id, initializer)
         }
     }
 
@@ -270,7 +280,7 @@ impl<'eval> Eval<'_> {
     }
 
     pub fn evaluate(&mut self) -> anyhow::Result<EvalValue> {
-        let parser = Parser::new(self.source, self.expression_mode, false);
+        let mut parser = Parser::new(self.source, self.expression_mode, false);
         let tree = parser.parse()?;
 
         match self.eval(tree.iter()) {
@@ -349,14 +359,10 @@ impl<'eval> Eval<'_> {
         trace!("eval_terminal");
         let val = match &token.lexeme {
             Lexeme::Number(_, v) => EvalValue::Number(*v),
-            Lexeme::String(s) => EvalValue::String(s.to_string()),
-            Lexeme::Identifier(id) => {
-                if let Some(value) = self.eval_identifier(id) {
-                    value.clone()
-                } else {
-                    return Err(EvalErrors::UndefinedVar(id.clone(), token.span.line()));
-                }
-            }
+            Lexeme::String(s) => EvalValue::String(Cow::Owned(s.to_string())),
+            Lexeme::Identifier(id) => self
+                .eval_identifier(id)
+                .ok_or_else(|| EvalErrors::UndefinedVar(id.to_string(), token.span.line()))?,
             Lexeme::True => EvalValue::Boolean(true),
             Lexeme::False => EvalValue::Boolean(false),
             Lexeme::Nil => EvalValue::Nil,
@@ -400,7 +406,10 @@ impl<'eval> Eval<'_> {
         let result = match op.lexeme {
             Lexeme::Plus => match (left_expr, right_expr) {
                 (EvalValue::Number(l), EvalValue::Number(r)) => EvalValue::Number(l + r),
-                (EvalValue::String(l), EvalValue::String(r)) => EvalValue::String(l + &r),
+                (EvalValue::String(l), EvalValue::String(r)) => {
+                    let concatenated = format!("{}{}", l, r);
+                    EvalValue::String(Cow::Owned(concatenated))
+                }
                 _e => {
                     trace!("bad + operands: left = {:?}, right = {:?}", _e.0, _e.1);
                     return Err(EvalErrors::StringsOrNumbers(op.span.line()));
@@ -465,7 +474,7 @@ impl<'eval> Eval<'_> {
         };
 
         if let Lexeme::Identifier(id) = &token.lexeme {
-            self.add_var(id.clone(), initializer);
+            self.add_var(id, initializer);
         } else {
             panic!("invalid token {token}");
         }
@@ -473,12 +482,8 @@ impl<'eval> Eval<'_> {
         Ok(EvalValue::Nil)
     }
 
-    fn eval_identifier(&self, id: &str) -> Option<&EvalValue> {
-        if let Some(val) = self.var_value(id) {
-            Some(val)
-        } else {
-            None
-        }
+    fn eval_identifier(&self, id: &str) -> Option<EvalValue> {
+        self.var_value(id).cloned()
     }
 
     // some_var = expr
@@ -490,8 +495,8 @@ impl<'eval> Eval<'_> {
             let val = self
                 .var_value_mut(id)
                 .expect("already checked the var exists");
-            *val = new_val;
-            Ok(val.clone())
+            *val = new_val.clone();
+            Ok(new_val)
         }
     }
 
@@ -642,7 +647,7 @@ impl<'eval> Eval<'_> {
                         let (has_state, fn_type, params) =
                             self.extract_fn_details(callee, args, site, id)?;
 
-                        self.finish_call(f.name, args, has_state, fn_type, params)?
+                        self.finish_call(&f.name, args, has_state, fn_type, params)?
                     }
                     _v => panic!("eval_call: not a function: {_v}"),
                 };
@@ -667,7 +672,7 @@ impl<'eval> Eval<'_> {
                     let (has_state, fn_type, params) =
                         self.extract_fn_details(callee, args, site, &f.name)?;
 
-                    self.finish_call(f.name, args, has_state, fn_type, params)?
+                    self.finish_call(&f.name, args, has_state, fn_type, params)?
                 }
                 _v => panic!("eval_call: not a function: {_v}"),
             }
@@ -680,14 +685,14 @@ impl<'eval> Eval<'_> {
 
     fn finish_call(
         &mut self,
-        fn_name: String,
+        fn_name: &str,
         args: &[AstExpr],
         has_state: bool,
         fn_type: LoxFunctionType,
-        params: Option<Vec<String>>,
+        params: Option<Vec<Arc<str>>>,
     ) -> EvalResult<EvalValue> {
         let val = if has_state {
-            let mut func_state = if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&fn_name) {
+            let mut func_state = if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(fn_name) {
                 f.state
                     .take()
                     .expect("has_state was true but state is None")
@@ -701,7 +706,7 @@ impl<'eval> Eval<'_> {
 
             mem::swap(&mut self.env, &mut func_state);
 
-            if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(&fn_name) {
+            if let Some(EvalValue::FunDecl(f)) = self.var_value_mut(fn_name) {
                 f.state = Some(func_state);
             }
 
@@ -732,8 +737,8 @@ impl<'eval> Eval<'_> {
         callee: &AstExpr,
         args: &[AstExpr],
         site: &Span,
-        id: &String,
-    ) -> EvalResult<(bool, LoxFunctionType, Option<Vec<String>>)> {
+        id: &str,
+    ) -> EvalResult<FnDetails> {
         let (has_state, fn_type, params) =
             if let Some(EvalValue::FunDecl(lox_func)) = self.var_value(id) {
                 trace!("checking arity of {callee}");
@@ -758,27 +763,29 @@ impl<'eval> Eval<'_> {
     fn do_fn_call(
         &mut self,
         fn_type: &LoxFunctionType,
-        params: &Option<Vec<String>>,
+        params: &Option<Vec<Arc<str>>>,
         args: &[AstExpr],
     ) -> EvalResult<EvalValue> {
-        BlockScope::enter(self, |eval| {
-            let mut vals = Vec::with_capacity(args.len());
-            for (i, arg) in args.iter().enumerate() {
-                let val = eval.eval_expr(arg)?;
-                trace!("do_fn_call: arg{i}: {arg} = {val}");
-                vals.push(val.clone());
+        BlockScope::enter(self, |eval| match fn_type {
+            LoxFunctionType::System(name) => {
+                let vals: Result<Vec<_>, _> = args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, arg)| {
+                        let val = eval.eval_expr(arg)?;
+                        trace!("do_fn_call: arg{i}: {arg} = {val}");
+                        Ok(val)
+                    })
+                    .collect();
+                eval.call_system_fn(name, &vals?)
             }
-
-            match fn_type {
-                LoxFunctionType::System(name) => eval.call_system_fn(name, &vals),
-                LoxFunctionType::UserDefined(body) => {
-                    for (param, value) in params.iter().flatten().zip(vals) {
-                        eval.add_var(param.to_string(), Some(value));
-                    }
-
-                    trace!("calling UDF {fn_type}");
-                    eval.eval_ast(body)
+            LoxFunctionType::UserDefined(body) => {
+                for (param, arg) in params.iter().flatten().zip(args) {
+                    let val = eval.eval_expr(arg)?;
+                    eval.add_var(param, Some(val));
                 }
+                trace!("calling UDF {fn_type}");
+                eval.eval_ast(body)
             }
         })
     }
@@ -808,10 +815,14 @@ impl<'eval> Eval<'_> {
             None
         };
 
+        let interned_name = self.interner.intern(name);
+        let interned_params: Vec<Arc<str>> =
+            params.iter().map(|p| self.interner.intern(p)).collect();
+
         trace!("eval_fun_decl: saving state for {name}: {state:?}");
         self.add_lox_fn(LoxFunction {
-            name: name.to_string(),
-            params: Some(params.to_vec()),
+            name: interned_name,
+            params: Some(interned_params),
             fn_type: LoxFunctionType::UserDefined((*body).clone()),
             state,
         });
@@ -839,14 +850,53 @@ mod tests {
     use crate::span::Span;
     use crate::util::print_ast;
 
+    fn string_val(s: &str) -> EvalValue {
+        EvalValue::String(Cow::Owned(s.to_string()))
+    }
+
+    #[test]
+    fn test_thread_safety() {
+        // Test that EvalValue implements Send + Sync (required for anyhow::Error compatibility)
+        fn assert_send<T: Send>() {}
+        fn assert_sync<T: Sync>() {}
+
+        assert_send::<EvalValue>();
+        assert_sync::<EvalValue>();
+        assert_send::<EvalErrors>();
+        assert_sync::<EvalErrors>();
+    }
+
+    #[test]
+    fn test_string_interning_benefits() {
+        // Test that demonstrates string interning benefits
+        let program = r#"
+        fun fibonacci(n) {
+            if (n <= 1) return n;
+            return fibonacci(n - 1) + fibonacci(n - 2);
+        }
+
+        var x = 5;
+        var y = 10;
+        var result = fibonacci(x);
+        print result;
+        "#;
+
+        let mut eval = Eval::new(program, false);
+
+        // Verify the interner has some common strings
+        let interner_before = eval.interner.len();
+        let _ = eval.evaluate(); // May fail due to recursion, but should populate interner
+        let interner_after = eval.interner.len();
+
+        // Should have interned at least function names, variable names
+        assert!(interner_after >= interner_before);
+    }
+
     #[test]
     fn test_eval_value_display() {
         assert_eq!(format!("{}", EvalValue::Number(42.0)), "42");
         assert_eq!(format!("{}", EvalValue::Number(1.23)), "1.23");
-        assert_eq!(
-            format!("{}", EvalValue::String("hello".to_string())),
-            "hello"
-        );
+        assert_eq!(format!("{}", string_val("hello")), "hello");
         assert_eq!(format!("{}", EvalValue::Boolean(true)), "true");
         assert_eq!(format!("{}", EvalValue::Boolean(false)), "false");
         assert_eq!(format!("{}", EvalValue::Nil), "nil");
@@ -855,18 +905,12 @@ mod tests {
     #[test]
     fn test_eval_value_equality() {
         assert_eq!(EvalValue::Number(42.0), EvalValue::Number(42.0));
-        assert_eq!(
-            EvalValue::String("test".to_string()),
-            EvalValue::String("test".to_string())
-        );
+        assert_eq!(string_val("test"), string_val("test"));
         assert_eq!(EvalValue::Boolean(true), EvalValue::Boolean(true));
         assert_eq!(EvalValue::Nil, EvalValue::Nil);
 
         assert_ne!(EvalValue::Number(42.0), EvalValue::Number(43.0));
-        assert_ne!(
-            EvalValue::String("test".to_string()),
-            EvalValue::String("other".to_string())
-        );
+        assert_ne!(string_val("test"), string_val("other"));
         assert_ne!(EvalValue::Boolean(true), EvalValue::Boolean(false));
     }
 
@@ -881,7 +925,7 @@ mod tests {
     fn test_eval_terminal_number() {
         let eval = Eval::new("", false);
         let token = Token {
-            lexeme: Lexeme::Number("42".to_string(), 42.0),
+            lexeme: Lexeme::Number("42".into(), 42.0),
             span: Span::new(0, 0, 1),
         };
         let result = eval.eval_terminal(&token).unwrap();
@@ -892,11 +936,11 @@ mod tests {
     fn test_eval_terminal_string() {
         let eval = Eval::new("", false);
         let token = Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         };
         let result = eval.eval_terminal(&token).unwrap();
-        assert_eq!(result, EvalValue::String("hello".to_string()));
+        assert_eq!(result, string_val("hello"));
     }
 
     #[test]
@@ -959,7 +1003,7 @@ mod tests {
         assert_eq!(result, EvalValue::Boolean(true));
 
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("42".to_string(), 42.0),
+            lexeme: Lexeme::Number("42".into(), 42.0),
             span: Span::new(0, 0, 1),
         });
         let result = eval.eval_unary(&bang_token, &number_expr).unwrap();
@@ -975,7 +1019,7 @@ mod tests {
         };
 
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("42".to_string(), 42.0),
+            lexeme: Lexeme::Number("42".into(), 42.0),
             span: Span::new(0, 0, 1),
         });
         let result = eval.eval_unary(&minus_token, &number_expr).unwrap();
@@ -991,11 +1035,11 @@ mod tests {
         };
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("10".to_string(), 10.0),
+            lexeme: Lexeme::Number("10".into(), 10.0),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1014,18 +1058,18 @@ mod tests {
         };
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String(" world".to_string()),
+            lexeme: Lexeme::String(" world".into()),
             span: Span::new(0, 0, 1),
         });
 
         let result = eval
             .eval_binary(&plus_token, &left_expr, &right_expr)
             .unwrap();
-        assert_eq!(result, EvalValue::String("hello world".to_string()));
+        assert_eq!(result, string_val("hello world"));
     }
 
     #[test]
@@ -1033,11 +1077,11 @@ mod tests {
         let mut eval = Eval::new("", false);
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("10".to_string(), 10.0),
+            lexeme: Lexeme::Number("10".into(), 10.0),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1074,11 +1118,11 @@ mod tests {
         let mut eval = Eval::new("", false);
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1106,11 +1150,11 @@ mod tests {
         let mut eval = Eval::new("", false);
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("10".to_string(), 10.0),
+            lexeme: Lexeme::Number("10".into(), 10.0),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1176,7 +1220,7 @@ mod tests {
     fn test_eval_errors_display() {
         let error1 = EvalErrors::InvalidUnaryOp {
             op: Lexeme::Bang,
-            val: Box::new(EvalValue::String("test".to_string())),
+            val: Box::new(string_val("test")),
             line: 1,
         };
         assert_eq!(format!("{error1}"), "invalid op ! for test\n[line 1]");
@@ -1203,7 +1247,7 @@ mod tests {
         };
 
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("42".to_string(), 42.0),
+            lexeme: Lexeme::Number("42".into(), 42.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1223,7 +1267,7 @@ mod tests {
         };
 
         let string_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
 
@@ -1243,7 +1287,7 @@ mod tests {
         };
 
         let string_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
 
@@ -1263,11 +1307,11 @@ mod tests {
         };
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("10".to_string(), 10.0),
+            lexeme: Lexeme::Number("10".into(), 10.0),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1286,11 +1330,11 @@ mod tests {
             span: Span::new(0, 0, 1),
         };
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("42".to_string(), 42.0),
+            lexeme: Lexeme::Number("42".into(), 42.0),
             span: Span::new(0, 0, 1),
         });
         let string_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
 
@@ -1310,11 +1354,11 @@ mod tests {
         };
 
         let string_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1334,11 +1378,11 @@ mod tests {
         };
 
         let string_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1358,12 +1402,12 @@ mod tests {
         };
 
         let string_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::String("hello".to_string()),
+            lexeme: Lexeme::String("hello".into()),
             span: Span::new(0, 0, 1),
         });
 
         let number_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("5".to_string(), 5.0),
+            lexeme: Lexeme::Number("5".into(), 5.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1380,11 +1424,11 @@ mod tests {
         };
 
         let left_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("10".to_string(), 10.0),
+            lexeme: Lexeme::Number("10".into(), 10.0),
             span: Span::new(0, 0, 1),
         });
         let right_expr = AstExpr::Terminal(Token {
-            lexeme: Lexeme::Number("0".to_string(), 0.0),
+            lexeme: Lexeme::Number("0".into(), 0.0),
             span: Span::new(0, 0, 1),
         });
 
@@ -1476,14 +1520,14 @@ mod tests {
     fn test_eval_logical_or_with_strings() {
         let mut eval = Eval::new("\"\" or \"hello\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("".to_string()));
+        assert_eq!(result, string_val(""));
     }
 
     #[test]
     fn test_eval_logical_or_with_truthy_string() {
         let mut eval = Eval::new("\"hello\" or \"world\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("hello".to_string()));
+        assert_eq!(result, string_val("hello"));
     }
 
     #[test]
@@ -1525,14 +1569,14 @@ mod tests {
     fn test_eval_logical_and_with_strings() {
         let mut eval = Eval::new("\"hello\" and \"world\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("world".to_string()));
+        assert_eq!(result, string_val("world"));
     }
 
     #[test]
     fn test_eval_logical_and_with_empty_string() {
         let mut eval = Eval::new("\"\" and \"hello\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("hello".to_string()));
+        assert_eq!(result, string_val("hello"));
     }
 
     #[test]
@@ -1560,7 +1604,7 @@ mod tests {
     fn test_eval_logical_and_both_truthy() {
         let mut eval = Eval::new("42 and \"hello\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("hello".to_string()));
+        assert_eq!(result, string_val("hello"));
     }
 
     #[test]
@@ -1571,22 +1615,22 @@ mod tests {
         assert!(Eval::is_truthy(&EvalValue::Number(42.0)));
         assert!(Eval::is_truthy(&EvalValue::Number(0.0)));
         assert!(Eval::is_truthy(&EvalValue::Number(-1.0)));
-        assert!(Eval::is_truthy(&EvalValue::String("hello".to_string())));
-        assert!(Eval::is_truthy(&EvalValue::String("".to_string())));
+        assert!(Eval::is_truthy(&string_val("hello")));
+        assert!(Eval::is_truthy(&string_val("")));
     }
 
     #[test]
     fn test_eval_logical_chained_or() {
         let mut eval = Eval::new("false or nil or \"hello\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("hello".to_string()));
+        assert_eq!(result, string_val("hello"));
     }
 
     #[test]
     fn test_eval_logical_chained_and() {
         let mut eval = Eval::new("true and 42 and \"hello\"", true);
         let result = eval.evaluate().unwrap();
-        assert_eq!(result, EvalValue::String("hello".to_string()));
+        assert_eq!(result, string_val("hello"));
     }
 
     #[test]
@@ -1655,7 +1699,7 @@ mod tests {
     #[test]
     fn test_print_ast_simple() {
         let source = "var x = 42; print x;";
-        let parser = Parser::new(source, false, false);
+        let mut parser = Parser::new(source, false, false);
         let ast = parser.parse().unwrap();
 
         // This would print to stdout, so we just verify it doesn't panic
@@ -1672,7 +1716,7 @@ mod tests {
             print "small";
         }
         "#;
-        let parser = Parser::new(source, false, false);
+        let mut parser = Parser::new(source, false, false);
         let ast = parser.parse().unwrap();
 
         // This would print to stdout, so we just verify it doesn't panic

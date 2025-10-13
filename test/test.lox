@@ -1,0 +1,11 @@
+var temp;
+var a = 0;
+
+print "a = " + a;
+temp = a;
+print "temp = " + temp;
+
+temp = 10;
+print "temp = " + temp;
+a = temp;
+print "a = " + a;

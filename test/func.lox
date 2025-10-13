@@ -1,0 +1,15 @@
+ print "declaring a function";
+ fun foo() { print "in foo";}
+ print "declaring another function";
+ fun bar(one) { return "in bar: " + one; }
+ print "declaring a 3rd function";
+ fun baz(one, two) {
+     print "in baz";
+     print bar(one);
+     print bar(two);
+ }
+
+print 10;
+print clock();
+foo();
+baz("a", "b");

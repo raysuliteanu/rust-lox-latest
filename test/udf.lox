@@ -1,0 +1,24 @@
+fun log(l, s) {
+    fun debug(s) {
+        print "D: " + s;
+    }
+
+    fun info(s) {
+        print "I: " + s;
+    }
+
+    if (l == "info") {
+        info(s);
+    }
+    else if (l == "debug") {
+        debug(s);
+    } else {
+        print s;
+    }
+}
+
+log("info", "hello");
+log("debug", "world");
+log("", "ray");
+
+print log;

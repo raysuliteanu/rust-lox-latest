@@ -1,0 +1,8 @@
+// returning nil by default
+// should not print "bad", just "nil"
+fun f() {
+  return;
+  print "bad";
+}
+
+print f();

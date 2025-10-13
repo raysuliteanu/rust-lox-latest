@@ -1,0 +1,15 @@
+fun add(a,b) {
+    return a + b;
+}
+
+fun sub(a,b) {
+    return a - b;
+}
+
+var sum = add(1,2);
+var diff = sub(5,3);
+print sum;
+print diff;
+print add(1,2);
+print sub(1,2);
+print add(1,2) + sub(1,2);

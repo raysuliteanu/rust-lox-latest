@@ -1,0 +1,11 @@
+var i = 0;
+
+fun count() {
+    i = i + 1;
+    return i;
+}
+
+var counter = count;
+print counter;
+print counter();
+print counter();

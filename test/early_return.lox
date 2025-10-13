@@ -1,0 +1,12 @@
+fun foo(a) {
+    if (a == 1) {
+        print "early";
+        return a + 1;
+    }
+
+    print "late";
+    return a + 2;
+}
+
+print foo(1);
+print foo(2);

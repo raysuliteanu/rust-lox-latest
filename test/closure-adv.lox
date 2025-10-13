@@ -1,0 +1,29 @@
+// state.env[0]
+fun make_counter() {
+    // state.env[1]
+    var i = 0;
+    fun count() {
+        // state.env[2]
+        fun add(j) {
+            // state.env[3]
+            return j + 1;
+        }
+
+        i = add(i);
+        return i;
+    }
+
+    return count;
+}
+
+// state.env[0]
+
+var counter1 = make_counter();
+var counter2 = make_counter();
+// expect 112233 (on separate lines)
+print counter1();
+print counter2();
+print counter1();
+print counter2();
+print counter1();
+print counter2();

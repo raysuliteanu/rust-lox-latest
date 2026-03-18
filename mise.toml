@@ -1,0 +1,2 @@
+[env]
+GIT_DIR = "{{ config_root }}/.jj/repo/store/git"
